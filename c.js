@@ -1,2 +1,2 @@
-cont data=10;
-
+const data=10;
+const newData=20;
