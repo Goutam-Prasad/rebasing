@@ -1,0 +1,4142 @@
+"use strict";
+
+const csvPraser = require("csvtojson");
+const jwt = require("jsonwebtoken");
+const ObjectID = require("mongodb").ObjectID;
+
+// Local Imports
+const DbService = require("../mixins/db.mixins");
+const responseMixin = require("../mixins/response.mixins");
+const allowancesTemplate = require("../utils/allowancesTemplate");
+const { monthList, monthDays, MIN_WAITING_TIME } = require("../utils/config");
+const { customValidators } = require("../utils/customValidationObject.utils");
+const dateCheckUtil = require("../utils/dateCheckUtil");
+const {
+  dateDestruct,
+  timeDiffCalc,
+  getYearFromFY,
+  isLeapYear,
+} = require("../utils/dateCheckUtil");
+const errors = require("../utils/errorConfig");
+const { payslipTemplate } = require("../utils/pdf/htmlPdfTemplates");
+const generateEncryptedPdf = require("../utils/pdfEncryptGenerate");
+const generatePDF = require("../utils/pdfFromHtml");
+const {
+  getDesignationMapper,
+  returnEarningsDetails,
+  getTotalWeeklyOffs,
+} = require("../utils/utility");
+const { delay } = require("../utils/utility");
+const {
+  createPayslipRegisterExcel,
+  createTaxDeductionExcel,
+  createPFExcel,
+  createProfessionalTaxExcel,
+  createBankAdviceExcel,
+  createSalaryReportExcel,
+  createMonthlyCTCExcel,
+  createYTDEarningExcel,
+  createStatutoryBonusExcel,
+} = require("../utils/createExcel");
+const AllowancesMapping = {
+  tiffinLunchDinner: "Food",
+  mobile: "Mobile_Allowance",
+  telephone: "Telephone_Allowance",
+  dearness: "Dearness_Allowance",
+  LTA: "LTA",
+  project: "Project_Allowance",
+  childrenEducation: "Child_Education_Allowance",
+  hostelExpenditure: "Hostel_Expenditure_Allowance",
+  transportDivyangPerson: "Transport_Divyang_Person_Allowance",
+  transportBusinesss: "Transport_Businesss_Allowance",
+  conveyance: "Conveyance_Allowance",
+  tourTravel_transfer: "Tour_Travel_Transfer_Allowance",
+  daily: "Daily_Allowance",
+  helper: "Helper_Allowance",
+  research: "Research_Allowance",
+  uniform: "Uniform_Allowance",
+  transportRegular: "Transport_Regular_Allowance",
+  fixedMedical: "Fixed_Medical_Allowance",
+  overtime: "Overtime_Allowance",
+  fuelAndVehicleMaintenance: "Fuel_And_Vehicle_maintenance",
+  laptopReimbursement: "Laptop_Reimbursement",
+  booksOfPeriodicals: "Books_Of_Periodicals",
+};
+
+const ReverseAllowanceMapping = {
+  Food: "tiffinLunchDinner",
+  Mobile_Allowance: "mobile",
+  Telephone_Allowance: "telephone",
+  Dearness_Allowance: "dearness",
+  LTA: "LTA",
+  Project_Allowance: "project",
+  Child_Education_Allowance: "childrenEducation",
+  Hostel_Expenditure_Allowance: "hostelExpenditure",
+  Transport_Divyang_Person_Allowance: "transportDivyangPerson",
+  Transport_Businesss_Allowance: "transportBusinesss",
+  Conveyance_Allowance: "conveyance",
+  Tour_Travel_Transfer_Allowance: "tourTravel_transfer",
+  Daily_Allowance: "daily",
+  Helper_Allowance: "helper",
+  Research_Allowance: "research",
+  Uniform_Allowance: "uniform",
+  Transport_Regular_Allowance: "transportRegular",
+  Fixed_Medical_Allowance: "fixedMedical",
+  Overtime_Allowance: "overtime",
+  Fuel_And_Vehicle_maintenance: "fuelAndVehicleMaintenance",
+  Laptop_Reimbursement: "laptopReimbursement",
+  Books_Of_Periodicals: "booksOfPeriodicals",
+};
+
+const bonusList = [
+  "Incentive",
+  "Variable_Salary",
+  "Other_Allowance",
+  "Awards",
+  "Rewards",
+  "Leave_Encashment",
+  "Arrears",
+  "Puja_Bonus",
+  "Interim_Bonus",
+  "Accident",
+  "Overtime",
+  "Others_Credits",
+  "Advance_Salary",
+];
+
+const deductionList = [
+  "Loans",
+  "Fine",
+  "Advance Salary Deduction",
+  "Others_Debits",
+];
+
+const arrearsAndDeductionValidation = {
+  type: "object",
+  strict: true,
+  props: {
+    arrears: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    attendanceBonus: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    awards: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    incentive: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    leaveEncashment: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    otherAllowance: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    rewards: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    variableSalary: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    advanceSalary: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    loans: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    interimBonus: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    pujaBonus: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    accident: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+          causeOfInjury: { type: "string", empty: false },
+          insuranceNumber: { type: "string", empty: false },
+          dateAndTimeOfAccident: {
+            type: "string",
+            pattern: "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d.\\d\\d\\dZ",
+            messages: {
+              stringPattern:
+                "Date string pattern must be in ISO 8601 format with zone offset being Z, example: `1950-01-01T01:01:01.001Z` ",
+            },
+          },
+          placeOfAccident: { type: "string", empty: false },
+          description: { type: "string", empty: false },
+          witnessName: { type: "string", empty: false },
+          natureOfInjury: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+    fine: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+          actForWhichFineImposed: { type: "string", empty: false },
+          dateOfOffense: customValidators.dateTime,
+          fineReleaseDate: customValidators.dateTime,
+          hasEmployeeVerifiedProofs: { type: "boolean" },
+          nameOfPersonPresenceWhileExplaining: {
+            type: "string",
+            empty: false,
+          },
+          wagesPayable: { type: "number", positive: true },
+          wagesPeriod: { type: "number", positive: true },
+        },
+      },
+      optional: true,
+    },
+    overtime: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+          dateOnOvertimePaid: customValidators.dateTime,
+          dateOnOvertimeWorked: customValidators.dateTime,
+          normalRateWages: { type: "number", positive: true },
+          overtimeRateOfWages: { type: "number", positive: true },
+          totalOvertimeWorked: { type: "number", positive: true },
+        },
+      },
+      optional: true,
+    },
+    lop: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          days: { type: "number", positive: true, integer: true },
+        },
+      },
+      optional: true,
+    },
+    overDay: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          days: { type: "number", positive: true, integer: true },
+        },
+      },
+      optional: true,
+    },
+    custom: {
+      type: "array",
+      min: 0,
+      items: {
+        type: "object",
+        strict: true,
+        props: {
+          type: { type: "enum", values: ["credit", "debit"] },
+          amount: { type: "number", positive: true },
+          info: { type: "string", empty: false },
+          extraInfo: { type: "string" },
+          name: { type: "string", empty: false },
+        },
+      },
+      optional: true,
+    },
+  },
+};
+
+const generateMonthCloseObjects = {
+  arrears: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Arrears",
+      subDetails: "Arrears",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  attendanceBonus: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Attendance_Bonus",
+      subDetails: "Attendance_Bonus",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  awards: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Awards",
+      subDetails: "Awards",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  incentive: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Incentive",
+      subDetails: "Incentive",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  leaveEncashment: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Leave_Encashment",
+      subDetails: "Leave_Encashment",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  otherAllowance: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Other_Allowance",
+      subDetails: "Other_Allowance",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  rewards: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Rewards",
+      subDetails: "Rewards",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  variableSalary: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Variable_Salary",
+      subDetails: "Variable_Salary",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  advanceSalary: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "debit",
+      details: "Advance_Salary",
+      subDetails: "Advance_Salary",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  loans: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "debit",
+      details: "Loans",
+      subDetails: "Loans",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  interimBonus: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Bonuses",
+      subDetails: "Interim_Bonus",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  pujaBonus: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Puja_Bonus",
+      subDetails: "Puja_Bonus",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  accident: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+    causeOfInjury,
+    dateAndTimeOfAccident,
+    description,
+    insuranceNumber,
+    natureOfInjury,
+    placeOfAccident,
+    witnessName,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Accident",
+      subDetails: "Accident",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+      meta: {
+        causeOfInjury,
+        dateOfAccident: dateAndTimeOfAccident,
+        description,
+        insuranceNo: insuranceNumber,
+        natureOfInjury,
+        placeOfAccident,
+        timeOfAccident: dateAndTimeOfAccident,
+        witnessName,
+      },
+    };
+  },
+  fine: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+    actForWhichFineImposed,
+    dateOfOffense,
+    fineReleaseDate,
+    hasEmployeeVerifiedProofs,
+    nameOfPersonPresenceWhileExplaining,
+    wagesPayable,
+    wagesPeriod,
+  }) => {
+    return {
+      id: employeeID,
+      type: "debit",
+      details: "Fine",
+      subDetails: "Fine",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+      meta: {
+        actForWhichFineImposed,
+        dateOfOffense,
+        fineReleaseDate,
+        hasEmployeeVerifiedProofs,
+        nameOfPersonPresenceWhileExplaining,
+        wagesPayable,
+        wagesPeriod,
+      },
+    };
+  },
+  overtime: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+    dateOnOvertimePaid,
+    dateOnOvertimeWorked,
+    normalRateWages,
+    overtimeRateOfWages,
+    totalOvertimeWorked,
+  }) => {
+    return {
+      id: employeeID,
+      type: "credit",
+      details: "Overtime",
+      subDetails: "Overtime",
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+      meta: {
+        dateOnOvertimePaid,
+        dateOnOvertimeWorked,
+        normalRateWages,
+        overtimeRateOfWages,
+        totalOvertimeWorked,
+      },
+    };
+  },
+  lop: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    days,
+  }) => {
+    return {
+      id: employeeID,
+      type: "lop",
+      days,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+  overDay: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    days,
+  }) => {
+    return {
+      id: employeeID,
+      type: "overtime",
+      taxable: true,
+      month,
+      days,
+      financialYear,
+      organisationId,
+    };
+  },
+  custom: ({
+    employeeID,
+    month,
+    financialYear,
+    organisationID: organisationId,
+    amount,
+    info,
+    extraInfo,
+    type,
+  }) => {
+    return {
+      id: employeeID,
+      type,
+      details: type === "credit" ? "Others_Credits" : "Others_Debits",
+      subDetails: extraInfo,
+      amount,
+      othertext: info,
+      taxable: true,
+      month,
+      financialYear,
+      organisationId,
+    };
+  },
+};
+
+// TODO: Make every function a pure function.
+module.exports = {
+  name: "payslips",
+  // Mixin DB service into (current) 'users' service
+  mixins: [DbService("payslips"), responseMixin],
+  actions: {
+    updatePayslip: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              [
+                "finalPayslip",
+                "customPoint",
+                "user",
+                "selectedIndex",
+                "freezedPayslip",
+              ],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const {
+            finalPayslip,
+            customPoint,
+            user,
+            selectedIndex,
+            freezedPayslip,
+          } = ctx.params;
+          const { month, financialYear } = dateCheckUtil.checkFinancialYear();
+
+          let payslipExists = await this.adapter.findOne({
+            financialYear,
+            month,
+            "user._id": new ObjectID(user._id),
+          });
+          const fetchedUser = await this.broker.call("users.fetchUserById", {
+            "user._id": new ObjectID(user._id),
+          });
+          if (!fetchedUser) return this.error(errors.NO_USER_NOT_FOUND);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId: fetchedUser.organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze["payrollFreeze"])
+            return this.error("Payroll Freezed, Can not save payslip!");
+          if (!payslipExists) {
+            await this.adapter.insert({
+              user: fetchedUser,
+              finalPayslip,
+              customPoint,
+              financialYear,
+              month,
+              selectedIndex,
+              freezedPayslip,
+            });
+          } else {
+            await this.adapter.collection.updateOne(
+              {
+                financialYear,
+                month,
+                "user._id": new ObjectID(user._id),
+              },
+              {
+                $set: {
+                  user: fetchedUser,
+                  finalPayslip,
+                  customPoint,
+                  financialYear,
+                  month,
+                  selectedIndex,
+                  updatedAt: Date.now(),
+                },
+              }
+            );
+          }
+          await this.broker.call("ctc.updateDefaultSalary", {
+            id: user._id,
+            finalPayslip,
+            financialYear,
+            selectedIndex,
+          });
+          return this.success("Payslip saved successfully");
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    deleteCurrentPayslip: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["id"], ctx.params)) {
+            const { id } = ctx.params;
+            const { month, financialYear } = dateCheckUtil.checkFinancialYear();
+            await this.adapter.collection.deleteOne({
+              "user._id": new ObjectID(id),
+              financialYear,
+              month,
+            });
+            return this.success("Successfully deleted the payslip");
+          } else {
+            this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    deletePayslipByMonthAndFinancialYear: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["id", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const { id, month, financialYear } = ctx.params;
+          await this.adapter.collection.deleteOne({
+            "user._id": new ObjectID(id),
+            financialYear,
+            month,
+          });
+          return this.success("Successfully deleted the payslip");
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    deletePayslipByMonthAndFinancialYearV2: {
+      params: {
+        ID: { type: "objectID", ObjectID },
+        month: {
+          type: "number",
+          convert: true,
+          min: 0,
+          max: 11,
+          integer: true,
+        },
+        financialYear: customValidators.financialYear,
+      },
+      async handler(ctx) {
+        try {
+          const { ID, month, financialYear } = ctx.params;
+          await this.adapter.collection.deleteOne({
+            "user._id": new ObjectID(ID),
+            financialYear,
+            month,
+          });
+          return this.success("Successfully deleted the payslip");
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getPayslips: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["id"], ctx.params)) {
+            const { id } = ctx.params;
+            const { financialYear } = dateCheckUtil.checkFinancialYear();
+            let payslips = await this.adapter.find({
+              query: {
+                "user._id": new ObjectID(id),
+                financialYear,
+              },
+            });
+            return this.success("Payslips here", payslips);
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getPayslipById: {
+      async handler(ctx) {
+        const { id, month, financialYear } = ctx.params;
+        const data = await this.adapter.findOne({
+          "user._id": new ObjectID(id),
+          month: parseInt(month),
+          financialYear,
+        });
+        return data;
+      },
+    },
+    getPayslipsByFinancialYear: {
+      async handler(ctx) {
+        try {
+          const { id, financialYear } = ctx.params;
+          return await this.adapter.find({
+            query: { "user._id": new ObjectID(id), financialYear },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getPayslipsByOrgId: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId } = ctx.params;
+          return await this.adapter.find({
+            query: { "user.organisationId": organisationId },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getCurrentPayslip: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["id"], ctx.params)) return null;
+          const { id } = ctx.params;
+          const { financialYear } = dateCheckUtil.checkFinancialYear();
+          let payslips = await this.adapter.find({
+            query: {
+              "user._id": new ObjectID(id),
+              financialYear,
+            },
+          });
+          payslips = payslips.sort((a, b) => a.month > b.month);
+          return payslips.pop();
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return null;
+        }
+      },
+    },
+    generateInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createSalaryReportExcel(payslips);
+            // let csv =
+            //   "Employee ID" +
+            //   "," +
+            //   "Employee Name" +
+            //   "," +
+            //   "IT Regime" +
+            //   "," +
+            //   "Income Tax" +
+            //   "," +
+            //   "Total Deductions" +
+            //   "," +
+            //   "Total Earnings" +
+            //   "," +
+            //   "Takehome Amount" +
+            //   "\n";
+            // payslips.forEach((p) => {
+            //   let takehome =
+            //     p.user.regimeOptedStatus === 1
+            //       ? p.finalPayslip.newRegime.takeHome
+            //       : p.finalPayslip.oldRegime.takeHome;
+            //   const parsedAdvanceTax = isNaN(
+            //     parseInt(p.finalPayslip.advanceTax)
+            //   )
+            //     ? 0
+            //     : p.finalPayslip.advanceTax;
+            //   let incometax =
+            //     p.user.regimeOptedStatus === 1
+            //       ? p.finalPayslip.newRegime.incomeTax + parsedAdvanceTax
+            //       : p.finalPayslip.oldRegime.incomeTax + parsedAdvanceTax;
+            //   let deduction =
+            //     p.user.regimeOptedStatus === 1
+            //       ? p.finalPayslip.newRegime.deductions
+            //       : p.finalPayslip.oldRegime.deductions;
+            //   let regime =
+            //     p.user.regimeOptedStatus === 1
+            //       ? "IT NEW REGIME"
+            //       : "IT OLD REGIME";
+            //   csv =
+            //     csv +
+            //     p.user.currentOrganisationMeta.employeeId +
+            //     "," +
+            //     p.user.displayName +
+            //     "," +
+            //     regime +
+            //     "," +
+            //     Math.ceil(incometax) +
+            //     "," +
+            //     Math.ceil(deduction) +
+            //     "," +
+            //     Math.ceil(p.finalPayslip.totalEarnings) +
+            //     "," +
+            //     Math.ceil(takehome) +
+            //     "\n";
+            // });
+            // return csv;
+          } else {
+            return "";
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    generatePayslipInstructionsJSON: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          )
+            return [];
+          const { financialYear, month, organisationId } = ctx.params;
+          return await this.adapter.find({
+            query: {
+              financialYear,
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return [];
+        }
+      },
+    },
+    generatePFInstructions: {
+      async handler(ctx) {
+        try {
+          // TODO: remove the else statement
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createPFExcel(payslips);
+            //   let csv =
+            //     "Employee ID" +
+            //     "," +
+            //     "Employee Name" +
+            //     "," +
+            //     "UAN" +
+            //     "," +
+            //     "PF No" +
+            //     "," +
+            //     "PF Salary" +
+            //     "," +
+            //     "ELDI Wage" +
+            //     "," +
+            //     "Pension Wage" +
+            //     "," +
+            //     "Gross Salary" +
+            //     "," +
+            //     "Employee PF Contribution" +
+            //     "," +
+            //     "Employer PF contribution" +
+            //     "," +
+            //     "VPF contribution" +
+            //     "," +
+            //     "A/C 01" +
+            //     "," +
+            //     "A/C 02" +
+            //     "," +
+            //     "A/C 10" +
+            //     "," +
+            //     "A/C 21" +
+            //     "," +
+            //     "Total Employer Contribution" +
+            //     "," +
+            //     "Total PF" +
+            //     "\n";
+            //   payslips.forEach((p) => {
+            //     let proxyBasicDA = Math.ceil(p.finalPayslip.employer_PF * 8.333);
+            //     let eps =
+            //       proxyBasicDA > 15000 ? 15000 * 0.0833 : proxyBasicDA * 0.08333;
+            //     let employerPF = p.finalPayslip.employer_PF - eps;
+            //     csv += `${p.user.currentOrganisationMeta.employeeId},${
+            //       p.user.displayName
+            //     },,,${proxyBasicDA},${proxyBasicDA},${proxyBasicDA},${
+            //       p.finalPayslip.totalEarnings
+            //     },${Math.ceil(p.finalPayslip.employer_PF)},${Math.ceil(
+            //       p.finalPayslip.employer_PF
+            //     )},${Math.ceil(
+            //       p.finalPayslip.employee_PF - p.finalPayslip.employer_PF
+            //     )},${
+            //       p.finalPayslip.employer_PF === 0 ? 0 : Math.floor(employerPF)
+            //     },${
+            //       p.finalPayslip.employer_PF === 0
+            //         ? 0
+            //         : Math.ceil(
+            //             proxyBasicDA * 0.005 > 75 ? 75 : proxyBasicDA * 0.005
+            //           )
+            //     },${p.finalPayslip.employer_PF === 0 ? 0 : Math.ceil(eps)},${
+            //       p.finalPayslip.employer_PF === 0
+            //         ? 0
+            //         : Math.ceil(
+            //             proxyBasicDA * 0.005 > 75 ? 75 : proxyBasicDA * 0.005
+            //           )
+            //     },${Math.ceil(p.finalPayslip.employer_PF)},${Math.ceil(
+            //       p.finalPayslip.employer_PF + p.finalPayslip.employee_PF
+            //     )}\n`;
+            //   });
+            //   return csv;
+            // } else {
+            //   return "";
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    generateProfessionalTaxInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createProfessionalTaxExcel(payslips);
+            //   let csv =
+            //     "Employee ID" +
+            //     "," +
+            //     "Name" +
+            //     "," +
+            //     "PAN" +
+            //     "," +
+            //     "Gross Salary" +
+            //     "," +
+            //     "Professional Tax" +
+            //     "\n";
+            //   payslips.forEach((p) => {
+            //     csv =
+            //       csv +
+            //       p.user.currentOrganisationMeta.employeeId +
+            //       "," +
+            //       p.user.displayName +
+            //       "," +
+            //       p.user.PAN +
+            //       "," +
+            //       p.finalPayslip.totalEarnings +
+            //       "," +
+            //       p.finalPayslip.proffTax +
+            //       "\n";
+            //   });
+            //   return csv;
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generateTDSInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createTaxDeductionExcel(payslips);
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getCurrentMonthPayslipInfo: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["organisationId"], ctx.params)) {
+            let { organisationId } = ctx.params;
+            const { financialYear, month } = dateCheckUtil.checkFinancialYear();
+            let payslipsGenerated = await this.adapter.count({
+              query: {
+                month,
+                financialYear,
+                "user.organisationId": organisationId,
+              },
+            });
+            return { payslipsGenerated };
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getPayslipStructureCSV: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["organisationId"], ctx.params)) {
+            let { organisationId } = ctx.params;
+            const organisation = await this.broker.call(
+              "users.getOrganisationByOrganisationId",
+              {
+                organisationId: organisationId,
+              }
+            );
+            let csv = "Employee_ID,Name,UserName,Basic,Special_Allowance,HRA,";
+            csv += this.getOrgSettingCsv(organisation);
+            csv += "Statutory_Bonus,";
+            bonusList.forEach((val) => (csv += `${val},`));
+            deductionList.forEach((val) => (csv += `${val},`));
+            csv +=
+              "Gratuity,Employee_PF,Employer_PF,Employee_ESI,Employer_ESI,Employee_LWF,Employer_LWF,TDS,Profession_Tax,Surcharge\n";
+            let employeeList = await this.broker.call(
+              "users.fetchEmployeeList",
+              { organisationId }
+            );
+            employeeList.map((value) => {
+              csv += `${value.currentOrganisationMeta.employeeId},${value.displayName},${value.username}\n`;
+            });
+            return csv;
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    // Override payslip
+    getExistsPayslipStructureCSV: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["organisationId", "financialYear", "month"],
+              ctx.params
+            )
+          ) {
+            let { organisationId, financialYear, month } = ctx.params;
+            const organisation = await this.broker.call(
+              "users.getOrganisationByOrganisationId",
+              {
+                organisationId: organisationId,
+              }
+            );
+            let csv = "Employee_ID,Name,UserName,Basic,Special_Allowance,HRA,";
+            csv += this.getOrgSettingCsv(organisation);
+            csv += "Statutory_Bonus,";
+            bonusList.forEach((val) => (csv += `${val},`));
+            deductionList.forEach((val) => (csv += `${val},`));
+            csv +=
+              "Gratuity,Employee_PF,Employer_PF,Employee_ESI,Employer_ESI,Employee_LWF,Employer_LWF,TDS,Profession_Tax,Surcharge\n";
+            let payslipList = await this.adapter.find({
+              query: {
+                "user.organisationId": organisationId,
+                financialYear,
+                month: parseInt(month),
+              },
+            });
+            for (let value of payslipList) {
+              const { allowances, customAllowances, perquisites } =
+                organisation.organisationSettings;
+              const { user, finalPayslip } = value;
+              let tempCsv = `${user.currentOrganisationMeta.employeeId},${
+                user.displayName
+              },${user.username},${parseInt(finalPayslip.basic)},${
+                finalPayslip.specialAllowance
+              },${finalPayslip.HRA},`;
+              Object.keys(allowances ?? {}).forEach((val) => {
+                if (allowances[val].applicable) {
+                  if (!isNaN(parseInt(finalPayslip.otherAllowances[val]))) {
+                    tempCsv += `${finalPayslip.otherAllowances[val]},`;
+                  } else {
+                    tempCsv += "0,";
+                  }
+                }
+              });
+              Object.keys(customAllowances ?? {}).forEach((val) => {
+                if (!isNaN(parseInt(finalPayslip.customAllowances[val]))) {
+                  tempCsv += `${finalPayslip.customAllowances[val]},`;
+                } else {
+                  tempCsv += "0,";
+                }
+              });
+              Object.keys(perquisites ?? {}).forEach((val) => {
+                if (perquisites[val].applicable) {
+                  if (!isNaN(parseInt(finalPayslip.perks[val]))) {
+                    tempCsv += `${finalPayslip.perks[val]},`;
+                  } else {
+                    tempCsv += "0,";
+                  }
+                }
+              });
+              tempCsv += `${parseInt(finalPayslip.statutoryBonuse)},`;
+              bonusList.forEach((val) => {
+                if (
+                  finalPayslip.bonuses &&
+                  finalPayslip.bonuses[val] &&
+                  !isNaN(parseInt(finalPayslip.bonuses[val]))
+                ) {
+                  tempCsv += `${finalPayslip.bonuses[val]},`;
+                } else {
+                  tempCsv += "0,";
+                }
+              });
+              deductionList.forEach((val) => {
+                if (
+                  finalPayslip.monthClose &&
+                  finalPayslip.monthClose[val] &&
+                  !isNaN(parseInt(finalPayslip.monthClose[val]))
+                ) {
+                  tempCsv += `${finalPayslip.monthClose[val]},`;
+                } else {
+                  tempCsv += "0,";
+                }
+              });
+              const parsedAdvanceTax = isNaN(parseInt(finalPayslip.advanceTax))
+                ? 0
+                : finalPayslip.advanceTax;
+              tempCsv += `${finalPayslip.gratuity},${
+                finalPayslip.employee_PF
+              },${finalPayslip.employer_PF},${finalPayslip.employee_ESI},${
+                finalPayslip.employer_ESI
+              },${finalPayslip.employee_LWF},${finalPayslip.employer_LWF},${
+                user.regimeOptedStatus === 1
+                  ? finalPayslip.newRegime.incomeTax + parsedAdvanceTax || 0
+                  : finalPayslip.oldRegime.incomeTax + parsedAdvanceTax || 0
+              },${finalPayslip.proffTax},${
+                user.regimeOptedStatus === 1
+                  ? finalPayslip.newRegime.surcharge || 0
+                  : finalPayslip.oldRegime.surcharge || 0
+              }\n`;
+              csv += tempCsv;
+            }
+            return csv;
+          } else {
+            return "";
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    validateAndExtractPayslip: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["files", "fields"], ctx.params)) {
+            const { files, fields } = ctx.params;
+            await delay(MIN_WAITING_TIME);
+            let organisation = await this.broker.call(
+              "users.getUserFromToken",
+              {
+                token: fields,
+              }
+            );
+            let payslipData = await csvPraser().fromFile(files.file[0].path);
+            let resultantPayslip = [];
+            for (let item of payslipData) {
+              if (this.validatePayslipData(item)) {
+                let user = await this.broker.call("users.fetchUserByUserName", {
+                  username: item.UserName,
+                });
+                if (user && user.organisationId == organisation.organisationId)
+                  resultantPayslip.push({
+                    user,
+                    finalPayslip: this.generatePayslip(item),
+                  });
+              }
+            }
+            return resultantPayslip;
+          } else {
+            return [];
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.validationFailed);
+          return [];
+        }
+      },
+    },
+    createPayslip: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              [
+                "month",
+                "financialYear",
+                "user",
+                "finalPayslip",
+                "selectedIndex",
+                "customPoint",
+              ],
+              ctx.params
+            )
+          ) {
+            const {
+              month,
+              financialYear,
+              user,
+              finalPayslip,
+              selectedIndex,
+              customPoint,
+              freezedPayslip,
+            } = ctx.params;
+            let payslipExists = await this.adapter.findOne({
+              financialYear,
+              month,
+              "user._id": new ObjectID(user._id),
+            });
+            const fetchedUser = await this.broker.call("users.fetchUserById", {
+              id: new ObjectID(user._id),
+            });
+            if (!fetchedUser) return this.error(errors.NO_USER_NOT_FOUND);
+            if (!payslipExists) {
+              await this.adapter.insert({
+                user: fetchedUser,
+                finalPayslip,
+                customPoint,
+                financialYear,
+                month,
+                selectedIndex,
+                freezedPayslip,
+              });
+            } else {
+              await this.adapter.collection.updateOne(
+                {
+                  financialYear,
+                  month,
+                  "user._id": new ObjectID(user._id),
+                },
+                {
+                  $set: {
+                    user: fetchedUser,
+                    finalPayslip,
+                    customPoint,
+                    financialYear,
+                    month,
+                    selectedIndex,
+                    freezedPayslip,
+                  },
+                }
+              );
+            }
+            return this.success("Successfully updated the payslip");
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.createError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getLatestPayslip: {
+      async handler(ctx) {
+        try {
+          const { id, financialYear, month: monthData } = ctx.params;
+          const month = parseInt(monthData);
+          const existPayslip = await this.adapter.findOne({
+            "user._id": new ObjectID(id),
+            financialYear,
+            month,
+          });
+          if (existPayslip) {
+            return existPayslip;
+          }
+          const allPayslips = await this.adapter.find({
+            query: { "user._id": new ObjectID(id), financialYear },
+          });
+          if (allPayslips.length !== 0) {
+            return allPayslips[allPayslips.length - 1];
+          }
+          return null;
+        } catch (err) {
+          this.logger.error(err.message || errors.createError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    uploadEmployeePreviousPayslipData: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["month", "financialYear", "employeeData"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          let organisation = await this.broker.call("users.getUserFromToken", {
+            token: ctx.requestID,
+          });
+          if (!organisation) return this.error("ERROR: No Organisation found!");
+          const { organisationId } = organisation;
+          const { financialYear, month, employeeData } = ctx.params;
+          for (const element of employeeData) {
+            const { user, finalPayslip } = element;
+            await this.broker.call("payslips.createPayslip", {
+              user,
+              financialYear,
+              month,
+              finalPayslip,
+              customPoint: 0,
+              selectedIndex: 0,
+              freezedPayslip: false,
+            });
+          }
+          await this.broker.call("payslipfreeze.addPayslipFreeze", {
+            organisationId,
+            month,
+            financialYear,
+            payrollFreeze: true,
+          });
+          return this.success("Payslips has been added successfully");
+        } catch (err) {
+          this.logger.error(err.message || errors.createPayslip);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payslipCounter: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["organisationId", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+
+          const { organisationId, month, financialYear } = ctx.params;
+          const userList = await this.broker.call(
+            "users.fetchActiveEmployeeList",
+            {
+              organisationId,
+            }
+          );
+          const userLength = userList.length;
+
+          const generatedPayslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          for (const element of generatedPayslips) {
+            for (let j = 0; j < userList.length; j++) {
+              if (element.user.PAN == userList[j].PAN) {
+                userList.splice(j, 1);
+              }
+            }
+          }
+          const listOfNonGeneratedUsers = [];
+          const financialStartingYear = financialYear.split("-")[0];
+          for (let user of userList) {
+            const dateOfJoining = user.currentOrganisationMeta.dateOfJoining;
+            const dateOfGenerating = new Date();
+            dateOfGenerating.setFullYear(financialStartingYear);
+            dateOfGenerating.setMonth(month - 1);
+            const { monthDiff } = timeDiffCalc(dateOfJoining, dateOfGenerating);
+            if (monthDiff <= 0) {
+              listOfNonGeneratedUsers.push(user);
+            }
+          }
+          return {
+            totalEmployees: userLength,
+            totalPayslipGenerated: generatedPayslips.length,
+            totalNonGeneratedPayslips: userLength - generatedPayslips.length,
+            listOfNonGeneratedUsersCount: listOfNonGeneratedUsers.length,
+            listOfNonGeneratedUsers,
+          };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    dynamicReportGeneration: {
+      async handler(ctx) {
+        try {
+          const { organisationId, reportId, month, financialYear } = ctx.params;
+          const reportFields = await this.broker.call(
+            "orgReport.getReportByReportId",
+            { reportId }
+          );
+          if (!reportFields) return this.error(errors.dataNotFound);
+          const { fields } = reportFields;
+          const payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          if (payslips.length === 0) return this.error(errors.dataNotFound);
+          let report = `${fields[0].title}`;
+          for (let i = 1; i < fields.length; i++) {
+            report += `,${fields[i].title}`;
+          }
+          report += "\n";
+
+          for (let payslip of payslips) {
+            for (let field of fields) {
+              let value = await this.makeReport({
+                payslip,
+                field: field.key,
+              });
+              report +=
+                value && !value.toString().includes("undefined") ? value : ",";
+            }
+            report += "\n";
+          }
+          return report;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    dynamicJsonReport: {
+      async handler(ctx) {
+        try {
+          const { organisationId, reportId, month, financialYear } = ctx.params;
+          const reportFields = await this.broker.call(
+            "orgReport.getReportByReportId",
+            { reportId }
+          );
+          if (!reportFields) return this.error(errors.dataNotFound);
+          const fields = reportFields.fields;
+          const payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          if (payslips.length === 0)
+            return this.error("Payslip Not found for given month");
+          const data = {};
+          for (let payslip of payslips) {
+            const { PAN } = payslip.user;
+            let checkFields = {};
+            for (let field of fields) {
+              let value = await this.makeReport({
+                payslip,
+                field: field.key,
+              });
+              checkFields[field.key] =
+                value && !value.toString().includes("undefined")
+                  ? value.toString().split(",")[0]
+                  : " ";
+            }
+            data[PAN] = checkFields;
+          }
+          reportFields.data = data;
+          delete reportFields.fields;
+          return reportFields;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payslipOfOrganisation: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return [];
+          const { organisationId, month, financialYear } = ctx.params;
+          return await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month,
+              financialYear,
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getPayslipPDF: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["id", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          let { id, month, financialYear } = ctx.params;
+          month = parseInt(month);
+          const user = await this.broker.call("users.fetchUserById", {
+            id,
+          });
+          const year = getYearFromFY(financialYear, month);
+          const organisation = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId: user.organisationId,
+            }
+          );
+          const groupMappers = await this.getGroupMappers(
+            user.organisationId,
+            month,
+            financialYear
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          const fileContent = await this.preparePayslipPDF({
+            id,
+            user,
+            month,
+            financialYear,
+            year,
+            organisation,
+            groupWeeklyMapper,
+            groupHolidayMapper,
+          });
+          if (!fileContent) this.error("ERROR_WHILE_SENDING_MAIL");
+          return generatePDF(
+            fileContent,
+            "A3",
+            "portrait",
+            false,
+            0,
+            0,
+            "",
+            false
+          );
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "ERROR_WHILE_GENERATING_FILE";
+        }
+      },
+    },
+    sendPayslipHTML: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["id", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const { id, month, financialYear } = ctx.params;
+          const user = await this.broker.call("users.fetchUserById", {
+            id,
+          });
+          const year = getYearFromFY(financialYear, parseInt(month));
+          const organisation = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId: user.organisationId,
+            }
+          );
+          const groupMappers = await this.getGroupMappers(
+            user.organisationId,
+            month,
+            financialYear
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          return this.preparePayslipPDF({
+            id,
+            user,
+            month,
+            financialYear,
+            year,
+            organisation,
+            groupWeeklyMapper,
+            groupHolidayMapper,
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return `<h1>No Data Found!</h1>`;
+        }
+      },
+    },
+    singlePayslipSendMail: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["id", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const { id, month, financialYear } = ctx.params;
+          const user = await this.broker.call("users.fetchUserById", {
+            id,
+          });
+          const year = getYearFromFY(financialYear, parseInt(month));
+          const organisation = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId: user.organisationId,
+            }
+          );
+          const groupMappers = await this.getGroupMappers(
+            user.organisationId,
+            month,
+            financialYear
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          const fileContent = await this.preparePayslipPDF({
+            id,
+            user,
+            month,
+            financialYear,
+            year,
+            organisation,
+            groupWeeklyMapper,
+            groupHolidayMapper,
+          });
+          if (!fileContent) this.error("ERROR_WHILE_SENDING_MAIL");
+          const fileData = await generatePDF(
+            fileContent,
+            "A3",
+            "portrait",
+            false,
+            0,
+            0,
+            "",
+            false
+          );
+          const sendOrNot = await this.broker.call("mail.payslipMailing", {
+            name: user.displayName,
+            primaryEmail: user.primaryEmail,
+            payslipBuffer: fileData,
+            month,
+            financialYear,
+            orgName: organisation.displayName,
+            fileName: `payslip-${monthList[parseInt(month)]}.pdf`,
+          });
+          if (!sendOrNot) this.error("ERROR_WHILE_SENDING_MAIL");
+          return this.success(
+            "Single Payslip Mail sent successfully!"
+            // uploadedData.data.stored.Key
+          );
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payslipSendMail: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["organisationId", "month", "financialYear"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+
+          const payslipsData = await this.broker.call(
+            "payslips.payslipOfOrganisation",
+            {
+              organisationId,
+              month: parseInt(month),
+              financialYear,
+            }
+          );
+          if (payslipsData.success == "false" || payslipsData.length == 0)
+            return this.error("NO_PAYSLIPS_FOUND");
+          const organisationObj = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+
+          const fileNameArr = [];
+          for (const element of payslipsData) {
+            const fileContent = await generateEncryptedPdf(
+              element.user,
+              element.finalPayslip,
+              organisationObj
+            );
+
+            await this.broker.call("mail.payslipMailing", {
+              name: element.user.displayName,
+              primaryEmail: element.user.primaryEmail,
+              payslipBuffer: fileContent,
+              month,
+              financialYear,
+              orgName: organisationObj.displayName,
+              fileName: `${element.user.role}-${element.user.PAN}-${element.month}-${element.financialYear}.pdf`,
+            });
+          }
+          return this.success("Payslip Mail sent successfully!", {
+            fileNameArr,
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    bankAdviceJSON: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return [];
+          const { organisationId, financialYear, month } = ctx.params;
+          return await this.getBankAdviceStructure({
+            organisationId,
+            month,
+            financialYear,
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return [];
+        }
+      },
+    },
+    bankAdvice: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return "";
+          const { organisationId, financialYear, month } = ctx.params;
+          const payslips = await this.getBankAdviceStructure({
+            organisationId,
+            month,
+            financialYear,
+          });
+          return createBankAdviceExcel(payslips);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    payRegister: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["organisationId"], ctx.params)) {
+            let { organisationId, financialYear, month } = ctx.params;
+            const organisation = await this.broker.call(
+              "users.getOrganisationByOrganisationId",
+              {
+                organisationId: organisationId,
+              }
+            );
+            let columnArray = [
+              {
+                title: "Employee ID",
+                dataIndex: "employeeId",
+                key: "Employee_ID",
+              },
+              {
+                title: "Name",
+                dataIndex: "displayName",
+                key: "name",
+              },
+              {
+                title: "PAN",
+                dataIndex: "PAN",
+                key: "pan",
+              },
+              {
+                title: "Total Present Days",
+                dataIndex: "totalPresentDays",
+                key: "totalPresentDays",
+              },
+              {
+                title:
+                  "Total Number of Working Days Considered By Organisation",
+                dataIndex: "daysConsideredByOrg",
+                key: "daysConsideredByOrg",
+              },
+              {
+                title: "Basic",
+                dataIndex: "basic",
+                key: "basic",
+              },
+              {
+                title: "Basic-Arrears",
+                dataIndex: "basicArrears",
+                key: "basicArrears",
+              },
+              {
+                title: "HRA",
+                dataIndex: "HRA",
+                key: "HRA",
+              },
+              {
+                title: "HRA-Arrears",
+                dataIndex: "hraArrears",
+                key: "hraArrears",
+              },
+              {
+                title: "Special Allowances",
+                dataIndex: "specialAllowance",
+                key: "specialAllowance",
+              },
+              {
+                title: "Special Allowances-Arrears",
+                dataIndex: "specialAllowanceArrears",
+                key: "specialAllowanceArrears",
+              },
+            ];
+            const { allowances_data, columnDataArray } =
+              this.getAllowanceObjectData(organisation);
+            columnArray.push(...columnDataArray);
+            columnArray = [
+              ...columnArray,
+              {
+                title: "Statutory Bonuses",
+                dataIndex: "statutoryBonuse",
+                key: "statutoryBonuse",
+              },
+              {
+                title: "Reimbursements",
+                dataIndex: "reimbursements",
+                key: "reimbursements",
+              },
+              {
+                title: "Reimbursements-Arrears",
+                dataIndex: "reimbursementsArrears",
+                key: "reimbursementsArrears",
+              },
+              {
+                title: "Employee PF",
+                dataIndex: "employee_PF",
+                key: "employee_PF",
+              },
+              {
+                title: "Employee PF-Arrears",
+                dataIndex: "employee_PFArrears",
+                key: "employee_PFArrears",
+              },
+              {
+                title: "Employer PF",
+                dataIndex: "employer_PF",
+                key: "employer_PF",
+              },
+              {
+                title: "Employer PF-Arrears",
+                dataIndex: "employer_PFArrears",
+                key: "employer_PFArrears",
+              },
+              {
+                title: "Employee ESI",
+                dataIndex: "employee_ESI",
+                key: "employee_ESI",
+              },
+              {
+                title: "Employee ESI-Arrears",
+                dataIndex: "employee_ESIArrears",
+                key: "employee_ESIArrears",
+              },
+              {
+                title: "Employer ESI",
+                dataIndex: "employer_ESI",
+                key: "employer_ESI",
+              },
+              {
+                title: "Employer ESI-Arrears",
+                dataIndex: "employer_ESIArrears",
+                key: "employer_ESIArrears",
+              },
+              {
+                title: "Employee LWF",
+                dataIndex: "employee_LWF",
+                key: "employee_LWF",
+              },
+              {
+                title: "Employer LWF",
+                dataIndex: "employer_LWF",
+                key: "employer_LWF",
+              },
+              {
+                title: "Income Tax",
+                dataIndex: "incomeTax",
+                key: "incomeTax",
+              },
+              {
+                title: "Professional TAX",
+                dataIndex: "proffTax",
+                key: "proffTax",
+              },
+              {
+                title: "Other Deduction",
+                dataIndex: "otherDeduction",
+                key: "otherDeduction",
+              },
+              {
+                title: "Other Credits",
+                dataIndex: "bonuses",
+                key: "bonuses",
+              },
+              {
+                title: "Monthly CTC",
+                dataIndex: "monthlyCTCIncome",
+                key: "monthlyCTC",
+              },
+              {
+                title: "Total Earning",
+                dataIndex: "totalEarnings",
+                key: "totalEarnings",
+              },
+              {
+                title: "Total Deduction",
+                dataIndex: "deductions",
+                key: "deductions",
+              },
+              {
+                title: "TakeHome",
+                dataIndex: "takeHome",
+                key: "takeHome",
+              },
+            ];
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            let payRegister = [];
+            const groupMappers = await this.getGroupMappers(
+              organisationId,
+              month,
+              financialYear
+            );
+            const lopMapper = await this.broker.call(
+              "mclose.getMcloseLopObjectByOrganisation",
+              {
+                organisationId,
+                month: parseInt(month),
+                financialYear,
+              }
+            );
+            const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+            for (let val of payslips) {
+              let payslipData = await this.getPayRegisterObject(
+                val,
+                month,
+                financialYear,
+                organisation,
+                groupWeeklyMapper,
+                groupHolidayMapper,
+                lopMapper
+              );
+              allowances_data.forEach((_val) => {
+                payslipData[_val] = payslipData[_val] ? payslipData[_val] : 0;
+              });
+              payRegister.push(payslipData);
+            }
+            return { columnArray, payRegister };
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payRegisterV2: {
+      params: {
+        organisationID: { type: "uuid" },
+        financialYear: {
+          type: "string",
+          pattern: "(19|20)\\d{2}-(19|20)\\d{2}",
+          messages: {
+            stringPattern:
+              "Financial year string pattern must be in the format YYYY-YYYY, example: `2020-2021` ",
+          },
+        },
+        month: { type: "number", min: 0, max: 11, convert: true },
+      },
+      async handler(ctx) {
+        try {
+          let { organisationID, financialYear, month } = ctx.params;
+          const { data: organisation, success } = await this.broker.call(
+            "users.getOrganisationWithOrganisationID",
+            {
+              organisationID,
+            }
+          );
+          if (!success) {
+            return this.error(
+              "No organisation with the provided organisationID found",
+              null,
+              400,
+              errors.dataNotFound
+            );
+          }
+          let columnArray = [
+            {
+              title: "Employee ID",
+              dataIndex: "employeeId",
+              key: "Employee_ID",
+            },
+            {
+              title: "Name",
+              dataIndex: "displayName",
+              key: "name",
+            },
+            {
+              title: "PAN",
+              dataIndex: "PAN",
+              key: "pan",
+            },
+            {
+              title: "Total Present Days",
+              dataIndex: "totalPresentDays",
+              key: "totalPresentDays",
+            },
+            {
+              title: "Total Number of Working Days Considered By Organisation",
+              dataIndex: "daysConsideredByOrg",
+              key: "daysConsideredByOrg",
+            },
+            {
+              title: "Basic",
+              dataIndex: "basic",
+              key: "basic",
+            },
+            {
+              title: "Basic-Arrears",
+              dataIndex: "basicArrears",
+              key: "basicArrears",
+            },
+            {
+              title: "HRA",
+              dataIndex: "HRA",
+              key: "HRA",
+            },
+            {
+              title: "HRA-Arrears",
+              dataIndex: "hraArrears",
+              key: "hraArrears",
+            },
+            {
+              title: "Special Allowances",
+              dataIndex: "specialAllowance",
+              key: "specialAllowance",
+            },
+            {
+              title: "Special Allowances-Arrears",
+              dataIndex: "specialAllowanceArrears",
+              key: "specialAllowanceArrears",
+            },
+          ];
+          const { allowances_data, columnDataArray } =
+            this.getAllowanceObjectData(organisation);
+          columnArray.push(...columnDataArray);
+          columnArray = [
+            ...columnArray,
+            {
+              title: "Statutory Bonuses",
+              dataIndex: "statutoryBonuse",
+              key: "statutoryBonuse",
+            },
+            {
+              title: "Reimbursements",
+              dataIndex: "reimbursements",
+              key: "reimbursements",
+            },
+            {
+              title: "Reimbursements-Arrears",
+              dataIndex: "reimbursementsArrears",
+              key: "reimbursementsArrears",
+            },
+            {
+              title: "Employee PF",
+              dataIndex: "employee_PF",
+              key: "employee_PF",
+            },
+            {
+              title: "Employee PF-Arrears",
+              dataIndex: "employee_PFArrears",
+              key: "employee_PFArrears",
+            },
+            {
+              title: "Employer PF",
+              dataIndex: "employer_PF",
+              key: "employer_PF",
+            },
+            {
+              title: "Employer PF-Arrears",
+              dataIndex: "employer_PFArrears",
+              key: "employer_PFArrears",
+            },
+            {
+              title: "Employee ESI",
+              dataIndex: "employee_ESI",
+              key: "employee_ESI",
+            },
+            {
+              title: "Employee ESI-Arrears",
+              dataIndex: "employee_ESIArrears",
+              key: "employee_ESIArrears",
+            },
+            {
+              title: "Employer ESI",
+              dataIndex: "employer_ESI",
+              key: "employer_ESI",
+            },
+            {
+              title: "Employer ESI-Arrears",
+              dataIndex: "employer_ESIArrears",
+              key: "employer_ESIArrears",
+            },
+            {
+              title: "Employee LWF",
+              dataIndex: "employee_LWF",
+              key: "employee_LWF",
+            },
+            {
+              title: "Employer LWF",
+              dataIndex: "employer_LWF",
+              key: "employer_LWF",
+            },
+            {
+              title: "Income Tax",
+              dataIndex: "incomeTax",
+              key: "incomeTax",
+            },
+            {
+              title: "Professional TAX",
+              dataIndex: "proffTax",
+              key: "proffTax",
+            },
+            {
+              title: "Other Deduction",
+              dataIndex: "otherDeduction",
+              key: "otherDeduction",
+            },
+            {
+              title: "Other Credits",
+              dataIndex: "bonuses",
+              key: "bonuses",
+            },
+            {
+              title: "Monthly CTC",
+              dataIndex: "monthlyCTCIncome",
+              key: "monthlyCTC",
+            },
+            {
+              title: "Total Earning",
+              dataIndex: "totalEarnings",
+              key: "totalEarnings",
+            },
+            {
+              title: "Total Deduction",
+              dataIndex: "deductions",
+              key: "deductions",
+            },
+            {
+              title: "TakeHome",
+              dataIndex: "takeHome",
+              key: "takeHome",
+            },
+          ];
+          let payslips = await this.adapter.find({
+            query: {
+              financialYear,
+              "user.organisationId": organisationID,
+              month,
+            },
+          });
+          let payRegister = [];
+          const groupMappers = await this.getGroupMappers(
+            organisationID,
+            month,
+            financialYear
+          );
+          const lopMapper = await this.broker.call(
+            "mclose.getMcloseLopObjectByOrganisation",
+            {
+              organisationId: organisationID,
+              month: parseInt(month),
+              financialYear,
+            }
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          for (let val of payslips) {
+            let payslipData = await this.getPayRegisterObject(
+              val,
+              month,
+              financialYear,
+              organisation,
+              groupWeeklyMapper,
+              groupHolidayMapper,
+              lopMapper
+            );
+            allowances_data.forEach((_val) => {
+              payslipData[_val] = payslipData[_val] ? payslipData[_val] : 0;
+            });
+            payRegister.push(payslipData);
+          }
+          return { columnArray, payRegister };
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(
+            "Internal server error",
+            null,
+            500,
+            errors.somethingWrong
+          );
+        }
+      },
+    },
+    payslipRegisterExcel: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          let { organisationId, financialYear, month } = ctx.params;
+          const organisation = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId: organisationId,
+            }
+          );
+          if (!organisation) return this.error("NO ORGANISATION AVAILABLE");
+          const groupMappers = await this.getGroupMappers(
+            organisationId,
+            month,
+            financialYear
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          const lopMapper = await this.broker.call(
+            "mclose.getMcloseLopObjectByOrganisation",
+            {
+              organisationId,
+              month: parseInt(month),
+              financialYear,
+            }
+          );
+          let report = `Employee_ID,Name,PAN,Total Present Days,Total Number of Working Days Considered By Organisation,Basic,HRA,Special Allowances,`;
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.LTA &&
+            organisation.organisationSettings.allowances.LTA.applicable
+              ? "LTA,"
+              : "";
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.dearness &&
+            organisation.organisationSettings.allowances.dearness.applicable
+              ? "dearness,"
+              : "";
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.tiffinLunchDinner &&
+            organisation.organisationSettings.allowances.tiffinLunchDinner
+              .applicable
+              ? "FOOD,"
+              : "";
+          report = report.toUpperCase();
+          let allowances_data = [];
+          const { allowances, customAllowances, perquisites } =
+            organisation.organisationSettings;
+          if (organisation) {
+            Object.keys(allowances ?? {}).map((val) => {
+              if (
+                allowances[val].applicable &&
+                !["LTA", "DA", "tiffinLunchDinner"].some((a) => a === val)
+              ) {
+                report += `${AllowancesMapping[val]},`;
+                allowances_data.push(val);
+              }
+            });
+            Object.keys(customAllowances ?? {}).map((val) => {
+              report += `${val.toUpperCase()},`;
+              allowances_data.push(val);
+            });
+            if (perquisites) {
+              Object.keys(perquisites ?? {}).map((val) => {
+                if (perquisites[val].applicable) {
+                  report += `${allowancesTemplate.perquisites[val]["label"]},`;
+                  allowances_data.push(val);
+                }
+              });
+            }
+          }
+          report +=
+            `Statutory Bonuses,Reimbursements,Employee PF,Employer PF,Employee ESI,Employer ESI,Employee LWF,Employer LWF,Income Tax,Professional TAX,Other Deduction,Other Credits,Monthly CTC(Fixed Component),Total Earning,Total Deduction,Take Home\n`.toUpperCase();
+          let payslips = await this.adapter.find({
+            query: {
+              financialYear,
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+            },
+          });
+          const employeeList = [];
+          for (let val of payslips) {
+            const payslipData = await this.getPayRegisterObject(
+              val,
+              month,
+              financialYear,
+              organisation,
+              groupWeeklyMapper,
+              groupHolidayMapper,
+              lopMapper
+            );
+            employeeList.push(payslipData);
+            const {
+              employeeId,
+              PAN,
+              displayName,
+              basic,
+              HRA,
+              bonuses,
+              specialAllowance,
+              statutoryBonuse,
+              reimbursements,
+              employee_PF,
+              employer_PF,
+              employee_ESI,
+              employer_ESI,
+              employee_LWF,
+              employer_LWF,
+              incomeTax,
+              proffTax,
+              otherDeduction,
+              monthlyCTC,
+              totalEarnings,
+              deductions,
+              takeHome,
+              LTA,
+              DA,
+              FOOD,
+              monthlyVariable,
+              totalPresentDays,
+              daysConsideredByOrg,
+            } = payslipData;
+            const { organisationSettings } = organisation;
+            const { allowances } = organisationSettings;
+            const { LTA: lta, dearness, tiffinLunchDinner } = allowances;
+            let ltaValue = lta.applicable ? `,${LTA}` : ``;
+            let daValue = dearness.applicable ? `,${DA}` : ``;
+            let foodValue = tiffinLunchDinner.applicable ? `,${FOOD}` : ``;
+            report += `${employeeId},${displayName},${PAN},${totalPresentDays},${daysConsideredByOrg},${basic},${HRA},${specialAllowance}${ltaValue}${daValue}${foodValue}`;
+            allowances_data.forEach((_val) => {
+              report += `,${payslipData[_val] ? payslipData[_val] : 0}`;
+            });
+            report += `,${statutoryBonuse},${reimbursements},${employee_PF},${employer_PF},${employee_ESI},${employer_ESI},${employee_LWF},${employer_LWF},${incomeTax},${proffTax},${otherDeduction},${bonuses},${
+              monthlyCTC - monthlyVariable
+            },${totalEarnings},${deductions},${takeHome}\n`;
+          }
+          let res = createPayslipRegisterExcel(
+            employeeList,
+            allowances,
+            customAllowances,
+            perquisites,
+            allowances_data
+          );
+          console.log(res);
+          return res;
+          // return report;
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payRegisterCSV: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["organisationId"], ctx.params)) {
+            let { organisationId, financialYear, month } = ctx.params;
+            const organisation = await this.broker.call(
+              "users.getOrganisationByOrganisationId",
+              {
+                organisationId: organisationId,
+              }
+            );
+            if (!organisation) return "";
+            const groupMappers = await this.getGroupMappers(
+              organisationId,
+              month,
+              financialYear
+            );
+            const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+            const lopMapper = await this.broker.call(
+              "mclose.getMcloseLopObjectByOrganisation",
+              {
+                organisationId,
+                month: parseInt(month),
+                financialYear,
+              }
+            );
+            let csv =
+              "Employee_ID,Name,PAN,Basic,Basic-Arrears,HRA,HRA-Arrears,Special Allowances,Special Allowances-Arrears,";
+            const { allowances, customAllowances, perquisites } =
+              organisation.organisationSettings;
+            Object.keys(allowances ?? {}).forEach((val) => {
+              if (allowances[val].applicable) {
+                csv += `${AllowancesMapping[val]},`;
+              }
+            });
+            Object.keys(customAllowances ?? {}).forEach((val) => {
+              csv += `${val},`;
+            });
+            Object.keys(perquisites ?? {}).forEach((val) => {
+              if (perquisites[val].applicable) {
+                csv += `${allowancesTemplate.perquisites[val]["label"]},`;
+              }
+            });
+            csv +=
+              "Statutory Bonuses,Reimbursements,Reimbursements-Arrears,Employee PF,Employee PF-Arrears,Employer PF,,Employer PF-Arrears,Employee_ESI,Employee_ESI-Arrears,Employer_ESI,Employer_ESI-Arrears,Income Tax,Professional TAX,Other Deduction,Monthly CTC,Total Earning,Total Deduction,Take Home";
+
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            let payRegister = [];
+            for (let val of payslips) {
+              let payslipData = await this.getPayRegisterObject(
+                val,
+                month,
+                financialYear,
+                organisation,
+                groupWeeklyMapper,
+                groupHolidayMapper,
+                lopMapper
+              );
+              allowances.forEach((_val) => {
+                payslipData[_val] = payslipData[_val] ? payslipData[_val] : 0;
+              });
+              payRegister.push(payslipData);
+            }
+            return { csv, payRegister };
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generatePayRegisterV2: {
+      params: {
+        employeeID: { type: "objectID", ObjectID },
+        month: { type: "number", convert: true, min: 0, max: 11 },
+        financialYear: {
+          type: "string",
+          pattern: "(19|20)\\d{2}-(19|20)\\d{2}",
+          messages: {
+            stringPattern:
+              "Financial year string pattern must be in the format YYYY-YYYY, example: `2020-2021` ",
+          },
+        },
+        arrearsAndDeduction: arrearsAndDeductionValidation,
+      },
+      async handler(ctx) {
+        try {
+          let user = ctx.meta.user;
+          let { financialYear, month, arrearsAndDeduction, employeeID } =
+            ctx.params;
+
+          // create month close objects
+          let monthCloseArray = [];
+          let keys = Object.keys(arrearsAndDeduction);
+          for (let key of keys) {
+            let subArray = arrearsAndDeduction[key];
+            for (let item of subArray) {
+              monthCloseArray.push(
+                generateMonthCloseObjects[key]({
+                  ...item,
+                  employeeID,
+                  month,
+                  financialYear,
+                  organisationID: user.organisationID,
+                })
+              );
+            }
+          }
+          await Promise.all(
+            monthCloseArray.map(async (data) => {
+              try {
+                return await this.broker.call("mclose.addMonthCloseV2", {
+                  monthClose: {
+                    ...data,
+                    financialYear,
+                    month,
+                    organisationID: user.organisationID,
+                    ID: employeeID,
+                  },
+                });
+              } catch (error) {
+                return this.error("Error in month close creation", null, 500);
+              }
+            })
+          );
+          // let hasError = false;
+          // for(let i = 0; i < result.length; i++){
+          //   if(!result[i].success){
+          //     hasError = true;
+          //     break;
+          //   }
+          // }
+          // if(hasError){
+          //   return this.error("Failed to create month close objects", null, 500, errors.createError)
+          // }
+          // run payroll
+          let payslipData = await this.broker.call("tax.generatePayslipV2", {
+            employeeID,
+            financialYear,
+            month,
+            getGraphDataByKey: true,
+            sendGraphData: true,
+            savePayslip: true,
+          });
+          if (payslipData.success) {
+            return this.success(
+              "Successfully generated pay register",
+              payslipData.data.finalPayslip,
+              200
+            );
+          } else {
+            return this.error("Failed to generate pay register", null, 500);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(
+            "Internal server error",
+            null,
+            500,
+            errors.somethingWrong
+          );
+        }
+      },
+    },
+    monthlyCTC: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          let employeeDetails = [];
+          // let csv =
+          //   "Emp Code" +
+          //   "," +
+          //   "Employee Name" +
+          //   "," +
+          //   "Designation" +
+          //   "," +
+          //   "Date of joining" +
+          //   "," +
+          //   "Earning" +
+          //   "," +
+          //   "Deduction" +
+          //   "," +
+          //   "Takehome" +
+          //   "," +
+          //   "CTC" +
+          //   "\n";
+          for (let payslip of payslips) {
+            const { user, finalPayslip, regimeOptedStatus } = payslip;
+            const { newRegime, oldRegime } = finalPayslip;
+            const { _id } = user;
+            const userFromDB = await this.broker.call("users.fetchUserById", {
+              id: _id,
+            });
+            if (!userFromDB) continue;
+            const { currentOrganisationMeta, displayName, designationId } =
+              userFromDB;
+            const { monthlyCTC, totalEarnings } = finalPayslip;
+            const designation = await this.broker.call(
+              "designation.getDesignationByDesignationID",
+              {
+                designationId,
+              }
+            );
+            const designationName = designation
+              ? designation.designationName
+              : "";
+            let takeHome =
+              regimeOptedStatus === 1 ? newRegime.takeHome : oldRegime.takeHome;
+            let deduction =
+              regimeOptedStatus === 1
+                ? newRegime.deductions
+                : oldRegime.deductions;
+            employeeDetails.push({
+              employeeId: currentOrganisationMeta.employeeId,
+              displayName: displayName,
+              designation: designationName,
+              DOJ: currentOrganisationMeta.dateOfJoining,
+              totalEarnings: totalEarnings,
+              deduction: deduction,
+              takehome: takeHome,
+              monthlyCTC: monthlyCTC,
+            });
+            // csv += `${currentOrganisationMeta.employeeId},${displayName},${designationName},${currentOrganisationMeta.dateOfJoining},${totalEarnings},${deduction},${takeHome},${monthlyCTC}\n`;
+          }
+          return createMonthlyCTCExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    statutoryBonusReport: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let designations = await this.broker.call(
+            "designation.getAllDesignationsByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          let designationMapper = getDesignationMapper(designations);
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          let employeeDetails = [];
+          payslips.forEach((p) => {
+            if (p.finalPayslip.statutoryBonuse > 0) {
+              let employeeId = p.user.currentOrganisationMeta.employeeId;
+              let displayName = p.user.displayName;
+              let designation = designationMapper[p.user.designationId];
+              let totalEarnings = p.finalPayslip.totalEarnings;
+              let statutoryBonus = p.finalPayslip.statutoryBonuse;
+              employeeDetails.push({
+                employeeId: employeeId,
+                displayName: displayName,
+                totalEarnings: totalEarnings,
+                designation: designation,
+                statutoryBonus: statutoryBonus,
+              });
+            }
+          });
+          return createStatutoryBonusExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    statutoryBonus: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          let bonuses = [];
+          payslips.forEach((p) => {
+            let total = 0;
+            Object.keys(p.finalPayslip.bonuses).forEach((val) => {
+              total += parseInt(p.finalPayslip.bonuses[val]);
+            });
+            if (total !== 0) {
+              let tempBonus = {
+                ...p,
+                total,
+              };
+              bonuses.push(tempBonus);
+            }
+          });
+          return bonuses;
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    ytdEarningsCSV: {
+      async handler(ctx) {
+        try {
+          console.log("enterd here");
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              financialYear,
+            },
+          });
+          let designations = await this.broker.call(
+            "designation.getAllDesignationsByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          let designationMapper = getDesignationMapper(designations);
+          let employeeYTD = this.makeYTDReport(payslips);
+          let employeeDetails = [];
+          // let csv =
+          //   "Employee ID" +
+          //   "," +
+          //   "Name" +
+          //   "," +
+          //   "Designation" +
+          //   "," +
+          //   "Earning" +
+          //   "," +
+          //   "Deduction" +
+          //   "," +
+          //   "Take Home" +
+          //   "\n";
+          Object.keys(employeeYTD).map((val) => {
+            let { user, earning, deduction, takeHome } = employeeYTD[val];
+            let { currentOrganisationMeta, displayName, designationId } = user;
+            let employeeId = currentOrganisationMeta.employeeId || " ";
+            displayName = displayName || " ";
+            let designation = designationMapper[designationId] || " ";
+            earning = earning ? earning.toString() : "0";
+            deduction = deduction ? deduction.toString() : "0";
+            takeHome = takeHome ? takeHome.toString() : "0";
+            employeeDetails.push({
+              employeeId: employeeId,
+              displayName: displayName,
+              designation: designation,
+              earning: earning,
+              deduction: deduction,
+              takeHome: takeHome,
+            });
+          });
+          return createYTDEarningExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    ytdEarnings: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              financialYear,
+            },
+          });
+          let employeeYTD = this.makeYTDReport(payslips);
+          let responseObject = [];
+          Object.keys(employeeYTD).map((val) => {
+            responseObject.push(employeeYTD[val]);
+          });
+          return responseObject;
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    // payslipExcelParser: {
+    //   async handler(ctx) {
+    //     const { files, fields, organisationId, month, financialYear } =
+    //       ctx.params;
+    //     const payslipJSON = getExcelData(files.file[0].path);
+    //     const payslipData = [];
+    //     const errorList = [];
+    //     for (let payslip of payslipJSON) {
+    //       const employeeId = payslip["Employee ID"];
+    //       const user = await this.broker.call("users.getUserByEmployeeId", {
+    //         employeeId,
+    //       });
+    //       if (Object.keys(user).length !== 0) {
+    //         const convertedPayslip = convertExcelToPayslipObject({
+    //           heading: Object.keys(payslip),
+    //           payslipData: Object.values(payslip),
+    //           regimeOptedStatus: user.regimeOptedStatus,
+    //         });
+    //         const {
+    //           basic: Basic,
+    //           monthlyCTC: Monthly_ctc,
+    //           proffTax: Profession_Tax,
+    //           specialAllowance: Special_Allowance,
+    //           totalEarnings: Total_Earnings,
+    //           totalFixedIncome: Total_Fixed_Income,
+    //         } = convertedPayslip;
+    //         let Income_Tax, takehome, Total_Deduction;
+    //         if (user.regimeOptedStatus === 1) {
+    //           takehome = convertedPayslip.oldRegime.takeHome;
+    //           Income_Tax = convertedPayslip.oldRegime.incomeTax;
+    //           Total_Deduction = convertedPayslip.oldRegime.deductions;
+    //         } else {
+    //           takehome = convertedPayslip.newRegime.takeHome;
+    //           Income_Tax = convertedPayslip.newRegime.incomeTax;
+    //           Total_Deduction = convertedPayslip.newRegime.deductions;
+    //         }
+    //         if (
+    //           !this.validatePayslipData({
+    //             Basic,
+    //             Monthly_ctc,
+    //             Income_Tax,
+    //             takehome,
+    //             Profession_Tax,
+    //             Special_Allowance,
+    //           })
+    //         ) {
+    //           errorList.push({
+    //             employeeId,
+    //             msg: "Validation Error",
+    //             fields: {
+    //               Basic,
+    //               Monthly_ctc,
+    //               Total_Deduction,
+    //               Income_Tax,
+    //               takehome,
+    //               Profession_Tax,
+    //               Special_Allowance,
+    //               Total_Earnings,
+    //               Total_Fixed_Income,
+    //             },
+    //           });
+    //         } else {
+    //           payslipData.push({
+    //             user,
+    //             finalPayslip: convertedPayslip,
+    //             organisationId,
+    //             month,
+    //             financialYear,
+    //           });
+    //         }
+    //       } else {
+    //         errorList.push({ employeeId, msg: "No user found!" });
+    //       }
+    //     }
+    //     return { payslipData, errorList };
+    //   },
+    // },
+
+    //conversion
+    updateAllPayslipUserModels: {
+      async handler() {
+        const allPayslips = await this.adapter.find({});
+        for (let payslip of allPayslips) {
+          const { user, _id } = payslip;
+          if (!user) {
+            await this.adapter.collection.deleteOne({
+              _id: new ObjectID(_id),
+            });
+            continue;
+          }
+          if (user.username) {
+            continue;
+          }
+          const updatedUser = await this.broker.call("users.fetchUserById", {
+            id: user._id,
+          });
+          if (!updatedUser)
+            await this.adapter.collection.deleteOne({
+              _id: new ObjectID(_id),
+            });
+          else
+            await this.adapter.collection.updateOne(
+              { _id: new ObjectID(_id) },
+              {
+                $set: {
+                  user: updatedUser,
+                },
+              }
+            );
+        }
+        return "Updated Successfully!";
+      },
+    },
+    getUpdatedUserPayslip: {
+      async handler() {
+        const payslips = await this.adapter.find({});
+        for (let item of payslips) {
+          const { _id, user } = item;
+          const updateduser = await this.broker.call("users.fetchUserByPAN", {
+            PAN: user.PAN,
+          });
+          if (updateduser) continue;
+          await this.adapter.collection.updateOne(
+            { _id: new ObjectID(_id) },
+            {
+              $set: {
+                user: updateduser,
+              },
+            }
+          );
+          console.log({ PAN: user.PAN });
+        }
+        return "Updated";
+      },
+    },
+    //? Reports generator
+    // reportsGenerator: {
+    //     async handler(ctx) {
+    //         try {
+    //             if (!errors.validationCheck(["organisationId","type"], ctx.params)) return this.error(errors.wrongFieldError);
+    //             const { type, organisationId, financialYear, month} = ctx.params;
+    //             switch (type) {
+    //                 case 'bankAdvice':
+    //                     return await this.bankAdvice(organisationId,financialYear,month);
+    //                 case 'monthlyCTC':
+    //                     return await this.monthlyCTC(organisationId,month);
+    //                 default:
+    //                     return this.error("WRONG_TYPE_ERROR");
+    //             }
+    //         } catch (err) {
+    //             this.logger.error(err.message || errors.generatingFileError);
+    //             return this.error(errors.somethingWrong);
+    //         }
+    //     }
+
+    // },
+  },
+  methods: {
+    async getPayRegisterObject(
+      payslip,
+      month,
+      financialYear,
+      organisation,
+      groupWeeklyMapper,
+      groupHolidayMapper,
+      lopMapper
+    ) {
+      const { user } = payslip;
+      let {
+        groupId,
+        PAN,
+        displayName,
+        currentOrganisationMeta: { dateOfJoining, employeeId },
+        _id,
+      } = user;
+      const { arrears } = payslip.finalPayslip;
+      let payRegister = {
+        ...payslip.finalPayslip,
+      };
+      payRegister.basicArrears = arrears && arrears.basic ? arrears.basic : 0;
+      payRegister.hraArrears = arrears && arrears.HRA ? arrears.HRA : 0;
+      payRegister.ltaArrears = arrears && arrears.LTA ? arrears.LTA : 0;
+      payRegister.specialAllowanceArrears =
+        arrears && arrears.specialAllowance ? arrears.specialAllowance : 0;
+      payRegister.employee_PFArrears =
+        arrears && arrears.employee_PF ? arrears.employee_PF : 0;
+      payRegister.employer_PFArrears =
+        arrears && arrears.employer_PF ? arrears.employer_PF : 0;
+      payRegister.employee_ESIArrears =
+        arrears && arrears.employee_ESI ? arrears.employee_ESI : 0;
+      payRegister.employer_ESIArrears =
+        arrears && arrears.employer_ESI ? arrears.employer_ESI : 0;
+
+      Object.keys(payslip.finalPayslip.customAllowances).forEach((val) => {
+        payRegister[val] = payslip.finalPayslip.customAllowances[val];
+        payRegister[val + "Arrears"] =
+          arrears && arrears.customAllowances[val]
+            ? arrears.customAllowances[val]
+            : 0;
+      });
+      Object.keys(payslip.finalPayslip.otherAllowances).forEach((val) => {
+        payRegister[val] = payslip.finalPayslip.otherAllowances[val];
+        payRegister[val + "Arrears"] =
+          arrears && arrears.otherAllowances[val]
+            ? arrears.otherAllowances[val]
+            : 0;
+      });
+      Object.keys(payslip.finalPayslip.perks).forEach((val) => {
+        payRegister[val] = payslip.finalPayslip.perks[val];
+        payRegister[val + "Arrears"] =
+          arrears && arrears.perks[val] ? arrears.perks[val] : 0;
+      });
+
+      payRegister.takeHome =
+        user.regimeOptedStatus === 1
+          ? payslip.finalPayslip.newRegime.takeHome
+          : payslip.finalPayslip.oldRegime.takeHome;
+      payRegister.deductions =
+        user.regimeOptedStatus === 1
+          ? payslip.finalPayslip.newRegime.deductions
+          : payslip.finalPayslip.oldRegime.deductions;
+      const parsedAdvanceTax = isNaN(parseInt(payslip.finalPayslip.advanceTax))
+        ? 0
+        : payslip.finalPayslip.advanceTax;
+      payRegister.incomeTax =
+        user.regimeOptedStatus === 1
+          ? payslip.finalPayslip.newRegime.incomeTax + parsedAdvanceTax
+          : payslip.finalPayslip.oldRegime.incomeTax + parsedAdvanceTax;
+      let otherDeduction = 0;
+      if (payslip.finalPayslip.monthClose) {
+        Object.keys(payslip.finalPayslip.monthClose).forEach((val) => {
+          otherDeduction += payslip.finalPayslip.monthClose[val];
+        });
+      }
+      payRegister.otherDeduction = otherDeduction;
+      let bonuses = 0;
+      let bonusesArrears = 0;
+      if (payslip.finalPayslip.bonuses) {
+        Object.keys(payslip.finalPayslip.bonuses).forEach((val) => {
+          bonuses += payslip.finalPayslip.bonuses[val];
+          bonusesArrears +=
+            arrears && arrears.bonuses && arrears.bonuses[val]
+              ? arrears.bonuses[val]
+              : 0;
+        });
+      }
+      payRegister.bonuses = bonuses;
+      payRegister.bonusesArrears = bonusesArrears;
+      let reim = 0;
+      let reimArrears = 0;
+      if (payslip.finalPayslip.reimbursements) {
+        Object.keys(payslip.finalPayslip.reimbursements).forEach((val) => {
+          reim += payslip.finalPayslip.reimbursements[val];
+          reimArrears +=
+            arrears && arrears.reimbursements[val]
+              ? arrears.reimbursements[val]
+              : 0;
+        });
+      }
+      payRegister.reimbursements = reim;
+      payRegister.reimbursementsArrears = reimArrears;
+      delete payRegister.oldRegime;
+      delete payRegister.newRegime;
+      delete payRegister.otherAllowances;
+      delete payRegister.customAllowances;
+      delete payRegister.perks;
+      delete payRegister.arrears;
+      payRegister.statutoryBonuse = payslip.finalPayslip.statutoryBonuse
+        ? payslip.finalPayslip.statutoryBonuse
+        : 0;
+      payRegister.displayName = displayName;
+      payRegister.employeeId = employeeId;
+      payRegister.PAN = PAN;
+      payRegister.monthlyCTCIncome =
+        payslip.finalPayslip.monthlyCTC - payslip.finalPayslip.monthlyVariable;
+
+      if (!groupId) groupId = "";
+      let lopDetails = lopMapper[_id]
+        ? lopMapper[_id]
+        : {
+            lopDays: 0,
+            lopAmount: 0,
+          };
+
+      const year = getYearFromFY(financialYear, parseInt(month));
+      const daysWorking = await this.getTotalWorkingDays({
+        lopDays: lopDetails.lopDays,
+        dateOfJoining,
+        organisation,
+        month: parseInt(month),
+        year: parseInt(year),
+        groupId,
+        groupWeeklyMapper,
+        groupHolidayMapper,
+        user,
+      });
+      const { totalPresentDays, daysConsideredByOrg } = daysWorking;
+      payRegister.totalPresentDays = totalPresentDays;
+      payRegister.daysConsideredByOrg = daysConsideredByOrg;
+      return payRegister;
+    },
+    verifyAuthToken(token) {
+      let verification = jwt.verify(token, process.env.JWT_SECRET);
+      return verification;
+    },
+    validatePayslipData(payslipData) {
+      let { Basic, TDS, Profession_Tax, Special_Allowance } = payslipData;
+      return !(
+        !parseInt(Basic) ||
+        isNaN(parseInt(TDS)) ||
+        isNaN(parseInt(Profession_Tax)) ||
+        isNaN(parseInt(Special_Allowance))
+      );
+    },
+    filterUserData(user) {
+      delete user._id;
+      delete user.loginstate;
+      delete user.registerState;
+      delete user.eula;
+      delete user.createdAt;
+      delete user.updatedAt;
+      delete user.updateAt;
+      delete user.access;
+      return user;
+    },
+    generatePayslip(payslipData) {
+      let finalPayslip = {
+        DA: parseFloat(payslipData.Dearness_Allowance) || 0,
+        HRA: parseFloat(payslipData.HRA) || 0,
+        LTA: parseFloat(payslipData.LTA) || 0,
+        FOOD: parseFloat(payslipData.Food) || 0,
+        basic: parseFloat(payslipData.Basic) || 0,
+        bonuses: {},
+        customAllowances: {},
+        employee_ESI: parseFloat(payslipData.Employee_ESI) || 0,
+        employee_PF: parseFloat(payslipData.Employee_PF) || 0,
+        employer_ESI: parseFloat(payslipData.Employer_ESI) || 0,
+        employer_PF: parseFloat(payslipData.Employer_PF) || 0,
+        employer_LWF: parseFloat(payslipData.Employer_LWF) || 0,
+        employee_LWF: parseFloat(payslipData.Employee_LWF) || 0,
+        feesAndCommisions: {},
+        gratuity: parseFloat(payslipData.Gratuity) || 0,
+        monthlyCTC: 0,
+        monthlyFixed: 0,
+        monthlyVariable: parseFloat(payslipData.Monthly_Variable_Income) || 0,
+        monthClose: {},
+        newRegime: {
+          deductions: 0,
+          incomeTax: parseFloat(payslipData.TDS) || 0,
+          cess: 0,
+          surcharge: parseFloat(payslipData.Surcharge) || 0,
+          takeHome: 0,
+        },
+        oldRegime: {
+          deductions: 0,
+          incomeTax: parseFloat(payslipData.TDS) || 0,
+          cess: 0,
+          surcharge: parseFloat(payslipData.Surcharge) || 0,
+          takeHome: 0,
+        },
+        otherAllowances: {},
+        perks: {},
+        proffTax: parseFloat(payslipData.Profession_Tax) || 0,
+        specialAllowance: parseFloat(payslipData.Special_Allowance) || 0,
+        totalEarnings: 0,
+        totalFixedIncome: 0,
+        statutoryBonuse: parseFloat(payslipData.Statutory_Bonus) || 0,
+        totalVariableIncome: 0,
+        reimbursements: {},
+      };
+      delete payslipData.Dearness_Allowance;
+      delete payslipData.HRA;
+      delete payslipData.LTA;
+      delete payslipData.Food;
+      delete payslipData.Basic;
+      delete payslipData.Bonuses;
+      delete payslipData.Employee_ESI;
+      delete payslipData.Employer_ESI;
+      delete payslipData.Employee_PF;
+      delete payslipData.Employer_PF;
+      delete payslipData.Employee_LWF;
+      delete payslipData.Employer_LWF;
+      delete payslipData.Gratuity;
+      delete payslipData.Monthly_Variable;
+      delete payslipData.Other_Deductions;
+      delete payslipData.Income_Tax;
+      delete payslipData.takehome;
+      delete payslipData.Profession_Tax;
+      delete payslipData.Special_Allowance;
+      delete payslipData.Total_Variable_Income;
+      delete payslipData.Bonus;
+      delete payslipData.Employee_ID;
+      delete payslipData.Name;
+      delete payslipData.Net_Pay;
+      delete payslipData.TDS;
+      delete payslipData.Statutory_Bonus;
+      delete payslipData.Cess;
+      delete payslipData.Surcharge;
+      delete payslipData.UserName;
+      delete payslipData.Refreshment;
+      delete payslipData["Subsidized Lunch"];
+
+      Object.keys(ReverseAllowanceMapping).map((val) => {
+        if (
+          payslipData[val] &&
+          !isNaN(parseInt(payslipData[val])) &&
+          parseInt(payslipData[val]) > 0
+        ) {
+          finalPayslip.otherAllowances[ReverseAllowanceMapping[val]] =
+            parseFloat(payslipData[val]) || 0;
+        }
+        delete payslipData[val];
+      });
+
+      bonusList.forEach((val) => {
+        if (
+          payslipData[val] &&
+          !isNaN(parseInt(payslipData[val])) &&
+          parseInt(payslipData[val]) > 0
+        ) {
+          finalPayslip.bonuses[val] = parseFloat(payslipData[val]) || 0;
+          // TODO: Create monthclose fields
+        }
+        delete payslipData[val];
+      });
+
+      deductionList.forEach((val) => {
+        if (
+          payslipData[val] &&
+          !isNaN(parseInt(payslipData[val])) &&
+          parseInt(payslipData[val]) > 0
+        ) {
+          finalPayslip.monthClose[val] = parseFloat(payslipData[val]) || 0;
+          // TODO: Create monthclose fields here too
+        }
+        delete payslipData[val];
+      });
+
+      delete payslipData.PAN;
+
+      Object.keys(payslipData).map((val) => {
+        finalPayslip.customAllowances[val] = parseFloat(payslipData[val]) || 0;
+      });
+
+      const calculatedData = returnEarningsDetails(finalPayslip);
+      // TODO: Upload monthclose for the employee
+      finalPayslip = { ...finalPayslip, ...calculatedData };
+      finalPayslip.monthlyCTC =
+        finalPayslip.totalFixedIncome - finalPayslip.monthlyVariable;
+      finalPayslip.monthlyFixed = finalPayslip.totalFixedIncome;
+
+      return finalPayslip;
+    },
+
+    async getBankAdviceStructure({ organisationId, month, financialYear }) {
+      let payslips = await this.adapter.find({
+        query: {
+          financialYear,
+          "user.organisationId": organisationId,
+          month: parseInt(month),
+        },
+      });
+      const payslipData = [];
+      for (let payslip of payslips) {
+        const { user, finalPayslip, regimeOptedStatus } = payslip;
+        const { newRegime, oldRegime } = finalPayslip;
+        const { _id } = user;
+        const userFromDB = await this.broker.call("users.fetchUserById", {
+          id: _id,
+        });
+        if (!userFromDB) continue;
+        const { currentOrganisationMeta, displayName, bankInfo } = userFromDB;
+        let takeHome =
+          regimeOptedStatus === 1 ? newRegime.takeHome : oldRegime.takeHome;
+        const data = {
+          employeeId: currentOrganisationMeta.employeeId,
+          displayName,
+          bankName: bankInfo && bankInfo.bankName ? bankInfo.bankName : "",
+          accountNumber:
+            bankInfo && bankInfo.accountNumber
+              ? bankInfo.accountNumber.toString()
+              : "",
+          ifsc: bankInfo && bankInfo.ifsc ? bankInfo.ifsc : "",
+          takeHome,
+        };
+        payslipData.push(data);
+      }
+      console.log(payslipData);
+      return payslipData;
+    },
+    makeYTDReport(payslips) {
+      let employeeYTD = {};
+      payslips.forEach((p) => {
+        if (!employeeYTD[p.user.PAN]) {
+          employeeYTD[p.user.PAN] = {
+            takeHome: 0,
+            deduction: 0,
+            earning: 0,
+            user: p.user,
+          };
+        }
+        let takeHome =
+          p.user.regimeOptedStatus === 1
+            ? p.finalPayslip.newRegime.takeHome
+            : p.finalPayslip.oldRegime.takeHome;
+        let deduction =
+          p.user.regimeOptedStatus === 1
+            ? p.finalPayslip.newRegime.deductions
+            : p.finalPayslip.oldRegime.deductions;
+        let earning = p.finalPayslip.totalEarnings;
+        employeeYTD[p.user.PAN].takeHome += takeHome;
+        employeeYTD[p.user.PAN].deduction += deduction;
+        employeeYTD[p.user.PAN].earning += earning;
+      });
+      return employeeYTD;
+    },
+    async makeReport({ payslip, field }) {
+      // TODO: All allownaces and custom allowances report
+      const finalPayslip = payslip.finalPayslip;
+      const user = payslip.user;
+
+      if (field === "employeeId") {
+        return user.currentOrganisationMeta.employeeId + ",";
+      }
+      if (field === "displayName") {
+        return user.displayName + ",";
+      }
+      if (field === "designation") {
+        const designation = await this.broker.call(
+          "designation.getDesignationByDesignationID",
+          {
+            designationId: user.designationId,
+          }
+        );
+        const designationName = designation
+          ? designation.designationName
+          : "N/A";
+        return designationName + ",";
+      }
+      if (field === "statutoryBonus") {
+        return finalPayslip.statutoryBonuse
+          ? finalPayslip.statutoryBonuse
+          : 0 + ", ";
+      }
+      if (field === "basic") {
+        return Math.ceil(finalPayslip.basic) + ",";
+      }
+      if (field === "HRA") {
+        return Math.ceil(finalPayslip.HRA) + ",";
+      }
+      if (field === "LTA") {
+        return Math.ceil(finalPayslip.LTA) + ",";
+      }
+      if (field === "FOOD") {
+        return Math.ceil(finalPayslip.FOOD) + ",";
+      }
+      if (field === "specialAllowance") {
+        return finalPayslip.specialAllowance + ",";
+      }
+      if (field === "reimbursements") {
+        let reims = 0;
+        Object.keys(finalPayslip.reimbursements).forEach((val) => {
+          reims += finalPayslip.reimbursements[val];
+        });
+        return reims + ",";
+      }
+      if (field === "employee_PF") {
+        return Math.ceil(finalPayslip.employee_PF) + ",";
+      }
+      if (field === "employer_pf") {
+        return Math.ceil(finalPayslip.employer_PF) + ",";
+      }
+      if (field === "employee_ESI") {
+        return Math.ceil(finalPayslip.employee_ESI) + ",";
+      }
+      if (field === "employer_ESI") {
+        return Math.ceil(finalPayslip.employer_ESI) + ",";
+      }
+      if (field === "employee_LWF") {
+        return Math.ceil(finalPayslip.employee_ESI) + ",";
+      }
+      if (field === "employer_LWF") {
+        return Math.ceil(finalPayslip.employer_ESI) + ",";
+      }
+      if (field === "incomeTax") {
+        const parsedAdvanceTax = isNaN(parseInt(finalPayslip.advanceTax))
+          ? 0
+          : finalPayslip.advanceTax;
+        return user.regimeOptedStatus === 1
+          ? Math.ceil(finalPayslip.newRegime.incomeTax) + parsedAdvanceTax
+          : Math.ceil(finalPayslip.oldRegime.incomeTax) +
+              parsedAdvanceTax +
+              ",";
+      }
+      if (field === "proffTax") {
+        return Math.ceil(finalPayslip.proffTax) + ",";
+      }
+      if (field === "deduction") {
+        return user.regimeOptedStatus === 1
+          ? Math.ceil(finalPayslip.newRegime.deductions)
+          : Math.ceil(finalPayslip.oldRegime.deductions) + ",";
+      }
+      if (field === "totalEarnings") {
+        return Math.ceil(finalPayslip.totalEarnings) + ",";
+      }
+      if (field === "totalFixedIncome") {
+        return Math.ceil(finalPayslip.totalFixedIncome) + ",";
+      }
+      if (field === "totalVariableIncome") {
+        return Math.ceil(finalPayslip.totalVariableIncome) + ",";
+      }
+      if (field === "takeHome") {
+        return user.regimeOptedStatus === 1
+          ? Math.ceil(finalPayslip.newRegime.takeHome)
+          : Math.ceil(finalPayslip.oldRegime.takeHome) + ",";
+      }
+      if (field === "otherAllowances") {
+        let total = 0;
+        Object.keys(payslip.finalPayslip.otherAllowances).forEach((val) => {
+          total += parseInt(payslip.finalPayslip.otherAllowances[val]);
+        });
+        return total + ",";
+      }
+    },
+    getDesignationMapper(designations) {
+      let desMapper = {};
+      for (let des of designations) {
+        desMapper[des.designationId] = des.designationName;
+      }
+      return desMapper;
+    },
+    async preparePayslipPDF({
+      id,
+      user,
+      month,
+      financialYear,
+      year,
+      organisation,
+      groupWeeklyMapper,
+      groupHolidayMapper,
+    }) {
+      if (!user) return null;
+      const payslipData = await this.adapter.findOne({
+        "user._id": new ObjectID(id),
+        month: parseInt(month),
+        financialYear,
+      });
+      const lop = await this.broker.call("mclose.getEmployeeLOPDetails", {
+        id,
+        month: parseInt(month),
+        financialYear,
+      });
+
+      let lopDetails =
+        lop && lop.success
+          ? lop.message
+          : {
+              lopDays: 0,
+              lopAmount: 0,
+            };
+
+      if (!payslipData) return null;
+      const {
+        locationId,
+        designationId,
+        credentials,
+        bankInfo,
+        currentOrganisationMeta: { dateOfJoining },
+      } = user;
+      let { groupId } = user;
+      if (!groupId) groupId = "";
+      const esicNumber =
+        credentials && credentials.esicNumber ? credentials.esicNumber : "-";
+      const bankName = bankInfo && bankInfo.bankName ? bankInfo.bankName : "-";
+      const bankAccountNo =
+        bankInfo && bankInfo.accountNumber ? bankInfo.accountNumber : "-";
+      const ifsc = bankInfo && bankInfo.ifsc ? bankInfo.ifsc : "-";
+      const UAN = credentials && credentials.UAN ? credentials.UAN : "-";
+      const designation = await this.broker.call(
+        "designation.getDesignationByDesignationID",
+        {
+          designationId: designationId,
+        }
+      );
+      const designationName = designation ? designation.designationName : "-";
+      const location = locationId
+        ? await this.broker.call("location.getLocationByLocationID", {
+            locationId,
+          })
+        : null;
+      const locationName =
+        location && location.officeName ? location.officeName : "-";
+
+      // Organization details
+      const address = organisation.address
+        ? `${
+            organisation.address.addressLine1
+              ? organisation.address.addressLine1
+              : ""
+          }
+            ${
+              organisation.address.city ? ", " + organisation.address.city : ""
+            }${
+            organisation.address.state ? ", " + organisation.address.state : ""
+          }
+            ${
+              organisation.address.pincode
+                ? ", " + organisation.address.pincode
+                : ""
+            }${
+            organisation.address.country
+              ? ", " + organisation.address.country
+              : ""
+          }`
+        : "";
+      const totalWorkingDaysObject = await this.getTotalWorkingDays({
+        lopDays: parseInt(lopDetails.lopDays),
+        dateOfJoining,
+        organisation,
+        month: parseInt(month),
+        year: parseInt(year),
+        groupId,
+        groupWeeklyMapper,
+        groupHolidayMapper,
+        user,
+      });
+      const { daysConsideredByOrg, totalPresentDays } = totalWorkingDaysObject;
+      const basicDetails = {
+        location: locationName,
+        designation: designationName,
+        UAN,
+        bankName,
+        esicNumber,
+        bankAccountNo,
+        daysInMonth: daysConsideredByOrg,
+        totalWorkingDays: totalPresentDays,
+        organisationAddress: address,
+        organisationName: organisation.displayName,
+        image: organisation.image,
+        ifsc,
+      };
+      const finalPayslip = payslipData.finalPayslip;
+      const { arrears, finalPerks, perks } = finalPayslip;
+      let isArrearsZero = false;
+      if (!arrears || Object.keys(arrears).length === 0) {
+        isArrearsZero = true;
+      }
+      const perkDeductionDetails = {};
+      const bifurcatedPerk = {};
+      if (finalPerks && finalPerks.length) {
+        for (let perkItem of finalPerks) {
+          const { salaryDeductionAmount, bifurcatedAmount, name } = perkItem;
+          if (salaryDeductionAmount) {
+            perkDeductionDetails[name] = salaryDeductionAmount;
+          }
+          if (bifurcatedAmount) {
+            bifurcatedPerk[name] = bifurcatedAmount;
+          }
+          delete perks[name];
+        }
+      }
+      finalPayslip.perks = perks;
+      return payslipTemplate({
+        month,
+        year,
+        user,
+        finalPayslip,
+        organisation,
+        lopDetails,
+        basicDetails,
+        isArrearsZero,
+        arrears,
+        bifurcatedPerk,
+        deductionPerks: perkDeductionDetails,
+      });
+    },
+    async getTotalWorkingDays({
+      lopDays,
+      dateOfJoining,
+      organisation,
+      month,
+      year,
+      groupId,
+      groupWeeklyMapper,
+      groupHolidayMapper,
+      user,
+    }) {
+      const { organisationSettings } = organisation;
+      let daysInMonth = 0;
+      let totalPresentDays = 0;
+
+      // If the organisation set the fixed total working days for that month and year ,then check for the total working days.
+
+      if (
+        !(
+          !user.totalWorkingConfiguration ||
+          !user.totalWorkingConfiguration.year
+        ) &&
+        user.totalWorkingConfiguration.month === month &&
+        user.totalWorkingConfiguration.year === year
+      ) {
+        daysInMonth = user.totalWorkingConfiguration.totalWorkingDays;
+      } else {
+        // check for salary run date
+        // if -1 means its the date of end month
+        // if others values means, [ previous month date to current month that date ]
+        // which is always the previous month days in month;
+        if (
+          organisationSettings.isCurrentMonth === undefined ||
+          organisationSettings.isCurrentMonth === true ||
+          organisationSettings.salaryCycleDate === undefined ||
+          organisationSettings.salaryCycleDate == -1
+        ) {
+          daysInMonth = month === 1 && isLeapYear(year) ? 29 : monthDays[month];
+        } else {
+          daysInMonth =
+            month - 1 === 1 && isLeapYear(year) ? 29 : monthDays[month - 1];
+        }
+        const weeklyOffs = groupWeeklyMapper[groupId];
+        const { weeklyOffOne, weeklyOffTwo } = weeklyOffs
+          ? weeklyOffs
+          : { weeklyOffOne: 0, weeklyOffTwo: 0 };
+        if (organisationSettings.isWeekOffsExcludedInLOP) {
+          const totalWeekOff = getTotalWeeklyOffs({
+            weeklyOffOne,
+            weeklyOffTwo,
+            daysInMonth,
+            month,
+            year,
+          });
+          daysInMonth = daysInMonth - totalWeekOff;
+        }
+        if (organisationSettings.isHolidayExcludedInLOP) {
+          const holidayLength = groupHolidayMapper[groupId]
+            ? groupHolidayMapper[groupId]
+            : 0;
+          daysInMonth = daysInMonth - holidayLength;
+        }
+      }
+
+      const {
+        month: joiningMonth,
+        year: joiningYear,
+        day: dayWhenJoined,
+      } = dateDestruct(dateOfJoining);
+      if (month === joiningMonth - 1 && year === joiningYear) {
+        if (
+          organisationSettings.salaryCycleDate !== undefined &&
+          organisationSettings.salaryCycleDate !== -1
+        ) {
+          totalPresentDays =
+            organisationSettings.salaryCycleDate - dayWhenJoined + 1;
+        } else {
+          totalPresentDays = daysInMonth - dayWhenJoined + 1;
+        }
+      } else {
+        totalPresentDays = daysInMonth;
+      }
+      return {
+        daysConsideredByOrg: daysInMonth,
+        totalPresentDays: totalPresentDays - lopDays,
+      };
+    },
+
+    async getGroupMappers(organisationId, month, financialYear) {
+      const groupWeeklyMapper = {};
+      const groupHolidayMapper = {};
+      const year = getYearFromFY(financialYear, parseInt(month));
+      const groupsOfOrg = await this.broker.call("groups.getAllGroupsForOrg", {
+        organisationId,
+      });
+      for (let group of groupsOfOrg) {
+        const { groupId } = group;
+        const holidays = await this.broker.call(
+          "holiday.getHolidaysForMonthAndYear",
+          {
+            groupId,
+            organisationId,
+            month: parseInt(month) + 1,
+            year,
+          }
+        );
+        const weeklyOffs = await this.broker.call(
+          "weeklyOff.getWeeklyOffByGroupIdAndOrganisationId",
+          {
+            groupId,
+            organisationId,
+          }
+        );
+        groupWeeklyMapper[groupId] = weeklyOffs;
+        groupHolidayMapper[groupId] = holidays.length;
+      }
+      return { groupWeeklyMapper, groupHolidayMapper };
+    },
+
+    getAllowanceObjectData(organisation) {
+      const allowances_data = [];
+      const columnDataArray = [];
+      if (organisation) {
+        const { allowances, customAllowances, perquisites } =
+          organisation.organisationSettings;
+        if (allowances) {
+          Object.keys(allowances).map((val) => {
+            if (allowances[val].applicable) {
+              if (
+                Object.prototype.hasOwnProperty.call(AllowancesMapping, val)
+              ) {
+                columnDataArray.push(
+                  {
+                    title: allowances[val].label,
+                    dataIndex: AllowancesMapping[val],
+                    key: AllowancesMapping[val],
+                  },
+                  {
+                    title: `${allowances[val].label}-Arrears`,
+                    dataIndex: `${AllowancesMapping[val]}Arrears`,
+                    key: `${AllowancesMapping[val]}Arrears`,
+                  }
+                );
+              } else {
+                allowances_data.push(val);
+                columnDataArray.push(
+                  {
+                    title: allowances[val].label,
+                    dataIndex: val,
+                    key: val,
+                  },
+                  {
+                    title: `${allowances[val].label}-Arrears`,
+                    dataIndex: val + "Arrears",
+                    key: val + "Arrears",
+                  }
+                );
+              }
+            }
+          });
+        }
+        if (customAllowances) {
+          Object.keys(customAllowances).map((val) => {
+            allowances_data.push(val);
+            columnDataArray.push(
+              {
+                title: val,
+                dataIndex: val,
+                key: val,
+              },
+              {
+                title: val + "-Arrears",
+                dataIndex: val + "Arrears",
+                key: val + "Arrears",
+              }
+            );
+          });
+        }
+        if (perquisites) {
+          Object.keys(perquisites ?? {}).map((val) => {
+            if (perquisites[val].applicable) {
+              columnDataArray.push(
+                {
+                  title: allowancesTemplate.perquisites[val].label,
+                  dataIndex: val,
+                  key: val,
+                },
+                {
+                  title: allowancesTemplate.perquisites[val].label + "-Arrears",
+                  dataIndex: val + "Arrears",
+                  key: val + "Arrears",
+                }
+              );
+            }
+          });
+        }
+      }
+      return { allowances_data, columnDataArray };
+    },
+    getOrgSettingCsv(organisation) {
+      let csv = "";
+      if (organisation) {
+        const { allowances, customAllowances, perquisites } =
+          organisation.organisationSettings;
+        Object.keys(allowances ?? {}).forEach((val) => {
+          if (allowances[val].applicable) {
+            csv += `${AllowancesMapping[val]},`;
+          }
+        });
+        Object.keys(customAllowances ?? {}).forEach((val) => {
+          csv += `${val},`;
+        });
+        Object.keys(perquisites ?? {}).forEach((val) => {
+          if (perquisites[val].applicable) {
+            csv += `${allowancesTemplate.perquisites[val]["label"]},`;
+          }
+        });
+      }
+      return csv;
+    },
+  },
+};
