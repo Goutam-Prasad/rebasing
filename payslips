@@ -1,0 +1,441 @@
+    generateInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createSalaryReportExcel(payslips);
+          } else {
+            return "";
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    
+     generatePFInstructions: {
+      async handler(ctx) {
+        try {
+          // TODO: remove the else statement
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createPFExcel(payslips);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    
+        generateProfessionalTaxInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createProfessionalTaxExcel(payslips);
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
+        generateTDSInstructions: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(
+              ["financialYear", "month", "organisationId"],
+              ctx.params
+            )
+          ) {
+            let { financialYear, month, organisationId } = ctx.params;
+            let payslips = await this.adapter.find({
+              query: {
+                financialYear,
+                "user.organisationId": organisationId,
+                month: parseInt(month),
+              },
+            });
+            return createTaxDeductionExcel(payslips);
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
+    bankAdvice: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return "";
+          const { organisationId, financialYear, month } = ctx.params;
+          const payslips = await this.getBankAdviceStructure({
+            organisationId,
+            month,
+            financialYear,
+          });
+          return createBankAdviceExcel(payslips);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return "";
+        }
+      },
+    },
+    
+    payslipRegisterExcel: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          let { organisationId, financialYear, month } = ctx.params;
+          const organisation = await this.broker.call(
+            "users.getOrganisationByOrganisationId",
+            {
+              organisationId: organisationId,
+            }
+          );
+          if (!organisation) return this.error("NO ORGANISATION AVAILABLE");
+          const groupMappers = await this.getGroupMappers(
+            organisationId,
+            month,
+            financialYear
+          );
+          const { groupWeeklyMapper, groupHolidayMapper } = groupMappers;
+          const lopMapper = await this.broker.call(
+            "mclose.getMcloseLopObjectByOrganisation",
+            {
+              organisationId,
+              month: parseInt(month),
+              financialYear,
+            }
+          );
+          let report = `Employee_ID,Name,PAN,Total Present Days,Total Number of Working Days Considered By Organisation,Basic,HRA,Special Allowances,`;
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.LTA &&
+            organisation.organisationSettings.allowances.LTA.applicable
+              ? "LTA,"
+              : "";
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.dearness &&
+            organisation.organisationSettings.allowances.dearness.applicable
+              ? "dearness,"
+              : "";
+          report +=
+            organisation.organisationSettings &&
+            organisation.organisationSettings.allowances &&
+            organisation.organisationSettings.allowances.tiffinLunchDinner &&
+            organisation.organisationSettings.allowances.tiffinLunchDinner
+              .applicable
+              ? "FOOD,"
+              : "";
+          report = report.toUpperCase();
+          let allowances_data = [];
+          const { allowances, customAllowances, perquisites } =
+            organisation.organisationSettings;
+          if (organisation) {
+            Object.keys(allowances ?? {}).map((val) => {
+              if (
+                allowances[val].applicable &&
+                !["LTA", "DA", "tiffinLunchDinner"].some((a) => a === val)
+              ) {
+                report += `${AllowancesMapping[val]},`;
+                allowances_data.push(val);
+              }
+            });
+            Object.keys(customAllowances ?? {}).map((val) => {
+              report += `${val.toUpperCase()},`;
+              allowances_data.push(val);
+            });
+            if (perquisites) {
+              Object.keys(perquisites ?? {}).map((val) => {
+                if (perquisites[val].applicable) {
+                  report += `${allowancesTemplate.perquisites[val]["label"]},`;
+                  allowances_data.push(val);
+                }
+              });
+            }
+          }
+          report +=
+            `Statutory Bonuses,Reimbursements,Employee PF,Employer PF,Employee ESI,Employer ESI,Employee LWF,Employer LWF,Income Tax,Professional TAX,Other Deduction,Other Credits,Monthly CTC(Fixed Component),Total Earning,Total Deduction,Take Home\n`.toUpperCase();
+          let payslips = await this.adapter.find({
+            query: {
+              financialYear,
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+            },
+          });
+          const employeeList = [];
+          for (let val of payslips) {
+            const payslipData = await this.getPayRegisterObject(
+              val,
+              month,
+              financialYear,
+              organisation,
+              groupWeeklyMapper,
+              groupHolidayMapper,
+              lopMapper
+            );
+            employeeList.push(payslipData);
+            const {
+              employeeId,
+              PAN,
+              displayName,
+              basic,
+              HRA,
+              bonuses,
+              specialAllowance,
+              statutoryBonuse,
+              reimbursements,
+              employee_PF,
+              employer_PF,
+              employee_ESI,
+              employer_ESI,
+              employee_LWF,
+              employer_LWF,
+              incomeTax,
+              proffTax,
+              otherDeduction,
+              monthlyCTC,
+              totalEarnings,
+              deductions,
+              takeHome,
+              LTA,
+              DA,
+              FOOD,
+              monthlyVariable,
+              totalPresentDays,
+              daysConsideredByOrg,
+            } = payslipData;
+            const { organisationSettings } = organisation;
+            const { allowances } = organisationSettings;
+            const { LTA: lta, dearness, tiffinLunchDinner } = allowances;
+            let ltaValue = lta.applicable ? `,${LTA}` : ``;
+            let daValue = dearness.applicable ? `,${DA}` : ``;
+            let foodValue = tiffinLunchDinner.applicable ? `,${FOOD}` : ``;
+            report += `${employeeId},${displayName},${PAN},${totalPresentDays},${daysConsideredByOrg},${basic},${HRA},${specialAllowance}${ltaValue}${daValue}${foodValue}`;
+            allowances_data.forEach((_val) => {
+              report += `,${payslipData[_val] ? payslipData[_val] : 0}`;
+            });
+            report += `,${statutoryBonuse},${reimbursements},${employee_PF},${employer_PF},${employee_ESI},${employer_ESI},${employee_LWF},${employer_LWF},${incomeTax},${proffTax},${otherDeduction},${bonuses},${
+              monthlyCTC - monthlyVariable
+            },${totalEarnings},${deductions},${takeHome}\n`;
+          }
+          let res = createPayslipRegisterExcel(
+            employeeList,
+            allowances,
+            customAllowances,
+            perquisites,
+            allowances_data
+          );
+          console.log(res);
+          return res;
+          // return report;
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
+      monthlyCTC: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          let employeeDetails = [];
+          for (let payslip of payslips) {
+            const { user, finalPayslip, regimeOptedStatus } = payslip;
+            const { newRegime, oldRegime } = finalPayslip;
+            const { _id } = user;
+            const userFromDB = await this.broker.call("users.fetchUserById", {
+              id: _id,
+            });
+            if (!userFromDB) continue;
+            const { currentOrganisationMeta, displayName, designationId } =
+              userFromDB;
+            const { monthlyCTC, totalEarnings } = finalPayslip;
+            const designation = await this.broker.call(
+              "designation.getDesignationByDesignationID",
+              {
+                designationId,
+              }
+            );
+            const designationName = designation
+              ? designation.designationName
+              : "";
+            let takeHome =
+              regimeOptedStatus === 1 ? newRegime.takeHome : oldRegime.takeHome;
+            let deduction =
+              regimeOptedStatus === 1
+                ? newRegime.deductions
+                : oldRegime.deductions;
+            employeeDetails.push({
+              employeeId: currentOrganisationMeta.employeeId,
+              displayName: displayName,
+              designation: designationName,
+              DOJ: currentOrganisationMeta.dateOfJoining,
+              totalEarnings: totalEarnings,
+              deduction: deduction,
+              takehome: takeHome,
+              monthlyCTC: monthlyCTC,
+            });
+          }
+          return createMonthlyCTCExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
+       statutoryBonusReport: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let designations = await this.broker.call(
+            "designation.getAllDesignationsByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          let designationMapper = getDesignationMapper(designations);
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              month: parseInt(month),
+              financialYear,
+            },
+          });
+          let employeeDetails = [];
+          payslips.forEach((p) => {
+            if (p.finalPayslip.statutoryBonuse > 0) {
+              let employeeId = p.user.currentOrganisationMeta.employeeId;
+              let displayName = p.user.displayName;
+              let designation = designationMapper[p.user.designationId];
+              let totalEarnings = p.finalPayslip.totalEarnings;
+              let statutoryBonus = p.finalPayslip.statutoryBonuse;
+              employeeDetails.push({
+                employeeId: employeeId,
+                displayName: displayName,
+                totalEarnings: totalEarnings,
+                designation: designation,
+                statutoryBonus: statutoryBonus,
+              });
+            }
+          });
+          return createStatutoryBonusExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
+    
+        ytdEarningsCSV: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, financialYear } = ctx.params;
+          let payslips = await this.adapter.find({
+            query: {
+              "user.organisationId": organisationId,
+              financialYear,
+            },
+          });
+          let designations = await this.broker.call(
+            "designation.getAllDesignationsByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          let designationMapper = getDesignationMapper(designations);
+          let employeeYTD = this.makeYTDReport(payslips);
+          let employeeDetails = [];
+                 Object.keys(employeeYTD).map((val) => {
+            let { user, earning, deduction, takeHome } = employeeYTD[val];
+            let { currentOrganisationMeta, displayName, designationId } = user;
+            let employeeId = currentOrganisationMeta.employeeId || " ";
+            displayName = displayName || " ";
+            let designation = designationMapper[designationId] || " ";
+            earning = earning ? earning.toString() : "0";
+            deduction = deduction ? deduction.toString() : "0";
+            takeHome = takeHome ? takeHome.toString() : "0";
+            employeeDetails.push({
+              employeeId: employeeId,
+              displayName: displayName,
+              designation: designation,
+              earning: earning,
+              deduction: deduction,
+              takeHome: takeHome,
+            });
+          });
+          return createYTDEarningExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    
