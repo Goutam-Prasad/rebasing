@@ -1,0 +1,2668 @@
+"use strict";
+const jwt = require("jsonwebtoken");
+const ApiService = require("moleculer-web");
+
+// Local Imports
+const ResponseMixin = require("../mixins/response.mixins");
+const multiparty = require("multiparty");
+const { monthList } = require("../utils/config");
+const config = require("../utils/config");
+
+// Config Variables
+const jwtSecret = config.env.JWT_SECRET;
+
+const responseModel = (data, res) => {
+  res.setHeader("Content-Type", "Application/Json; charset=utf-8");
+  res.writeHead(200);
+  res.end(JSON.stringify(data));
+};
+
+// Gateway Service Broker
+module.exports = {
+  name: "api",
+  mixins: [ApiService, ResponseMixin],
+  settings: {
+    port: config.env.PORT || 4001,
+    ip: "0.0.0.0",
+    // cors: {
+    // 	// Configures the Access-Control-Allow-Origin CORS header.
+    // 	origin: "*",
+    // 	// Configures the Access-Control-Allow-Methods CORS header.
+    // 	methods: ["GET", "OPTIONS", "POST", "PUT", "DELETE"],
+    // 	// Configures the Access-Control-Allow-Headers CORS header.
+    // 	allowedHeaders: [],
+    // 	// Configures the Access-Control-Expose-Headers CORS header.
+    // 	exposedHeaders: [],
+    // 	// Configures the Access-Control-Allow-Credentials CORS header.
+    // 	credentials: false,
+    // 	// Configures the Access-Control-Max-Age CORS header.
+    // 	maxAge: 3600
+    // },
+    routes: [
+      {
+        cors: {
+          origin: [
+            "http://localhost:3000/*",
+            "http://localhost:3000",
+            "http://localhost:4001",
+            "https://moolfinance.in",
+            "http://moolfinance.com",
+            "https://moolfinance.com",
+            "http://65.2.50.111/",
+            "http://mool.co.in/",
+            "http://www.mool.co.in/",
+            "https://www.mool.co.in/",
+            "https://mool.co.in/",
+            "https://*.mool.co.in/",
+            "https://*.moolfinance.com",
+            "https://*.amplifyapp.com",
+          ],
+        },
+        path: "/api",
+        mergeParams: true,
+        bodyParsers: {
+          json: { limit: "5MB" },
+          urlencoded: { extended: true, limit: "5MB" },
+        },
+        async onBeforeCall(ctx, _route, req) {
+          // return;
+          if (
+            req.url.indexOf("verify") === -1 &&
+            // && req.url.indexOf("instruction") === -1
+            // && req.url.indexOf("monthclose") === -1
+            // && req.url.indexOf("pdf") === -1
+            req.url.indexOf("auth_reset") === -1 &&
+            req.url.indexOf("profilepics ch") === -1 &&
+            req.url.indexOf("registerState") === -1 &&
+            req.url.indexOf("graph") === -1 &&
+            req.url.indexOf("calculator") === -1 &&
+            req.url.indexOf("auth_token") === -1 &&
+            req.url.indexOf("auth_check") === -1 &&
+            req.url.indexOf("auth_bypass") === -1 &&
+            req.url.indexOf("contact_us") === -1 &&
+            req.url.indexOf("login") === -1 &&
+            req.url.indexOf("migrate") === -1 &&
+            req.url.indexOf("subscribe") === -1 &&
+            req.url.indexOf("chargebee") === -1 &&
+            req.url.indexOf("razorpay") === -1
+
+            // && req.url.indexOf("organisationInstance") === -1
+          ) {
+            const token = req.headers["authorization"];
+            if (token === null || token === undefined) {
+              throw new Error("BAD REQUEST, UNAUTHENTICATED USER");
+            }
+            let user = this.authenticate(token);
+            if (user) {
+              let existUser = await ctx.call("auth.getUserByUserName", {
+                ...user.data,
+              });
+              if (user.data.role !== "admin") {
+                if (!existUser) {
+                  throw new Error("BAD REQUEST, UNAUTHENTICATED USER");
+                }
+              }
+              ctx.requestID = token;
+              ctx.meta.authenticatedUser = existUser;
+              ctx.meta.clientIp =
+                req.headers["x-forwarded-for"] ||
+                req.connection.remoteAddress ||
+                req.socket.remoteAddress ||
+                req.connection.socket.remoteAddress ||
+                "";
+              return;
+            } else {
+              throw new Error("BAD REQUEST, UNAUTHENTICATED USER");
+            }
+          }
+        },
+        async onError(req, res, err) {
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          if (err.code === 422 && err.type === "VALIDATION_ERROR") {
+            res.writeHead(err.code);
+            return res.end(
+              JSON.stringify(this.error({ type: err.type, errors: err.data }))
+            );
+          } else {
+            res.writeHead(500);
+            return res.end(
+              JSON.stringify(this.error("Static fallback response"))
+            );
+          }
+        },
+        // Calling options
+        callOptions: {
+          timeout: 3000000,
+          retries: 3,
+          // fallbackResponse: "Static fallback response"
+        },
+        aliases: {
+          /********************************************* AUTH ROUTER ******************************************* */
+          "GET auth/check": "auth.check",
+          "POST auth_check/validate/info": "auth.checkUserExists",
+          "POST auth_check/register": "auth.registerOrganisation",
+          "POST auth_check/login": "auth.login",
+          "POST auth_check/googleLogin": "auth.googleLogin",
+          "POST auth_check/register/ca": "auth.registerCA",
+          "PATCH update/username": "auth.updateUsername",
+          "PUT admin/organisation/set-block-state": "auth.updateDisabledStatus",
+          "POST change/registerState": "users.changeRegisterState",
+
+          /*---Calculator Feedback APIs Start---*/
+          "GET calculator": "calculatorFeedback.getAllFeedback",
+          "POST calculator": "calculatorFeedback.saveFeedback",
+          "PUT calculator": "calculatorFeedback.updateFeedback",
+          "GET calculator/result/:visitorID":
+            "calculatorFeedback.getVisitorById",
+          /*---Calculator Feedback APIs Start---*/
+
+          "POST subscribe": "subscribe.addSubscription",
+          "GET subscribe/list": "subscribe.getSubscriptionsList",
+
+          /*---Mool Admin APIs Start---*/
+          "GET admin/check": "admin.check",
+          "POST admin/login": "admin.login",
+          "POST admin/register": "admin.registerAdmin",
+          "POST admin/set/password": "admin.setPassword",
+          "POST admin/self/authentication": "admin.verifyAdminPassword",
+          "POST admin/update/user/status": "users.updateStatus",
+          "GET admin/search/:key/:role": "users.searchUsers",
+          "POST admin/update/user/payrollOutsourcing":
+            "users.changeIsPayrollOutsourcingFlag",
+          "POST admin/user/picture"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("admin.savePicture", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST admin/verify": "admin.verifyLoginDetails",
+
+          // Verify Organization
+          "GET admin/organizations": "users.getAllOrganizations",
+          "GET admin/ca": "users.getAllCAs",
+          "GET admin/user/request": "users.getAllRequest",
+          "DELETE admin/delete/all/users/:organisationId":
+            "users.deleteAllEmployeesPermanently",
+          "DELETE admin/delete/user/:id": "users.deleteUserPermanently",
+
+          // Statistics of original users in the mool system
+          "GET admin/dashboard-stats": "users.generateStatsOfUsers",
+
+          // Account originality
+          "PATCH admin/organisation/set-originality/:orgId/:original":
+            "users.setOrgAccountOriginalityStatus",
+          "PATCH admin/ca/set-originality/:caId/:original":
+            "users.setCaAccountOriginalityStatus",
+
+          // Subscription Deduction
+          "POST subscription": "subscription.saveOrUpdateSubscription",
+          "GET subscriptions/:organisationId":
+            "subscription.getSubscriptionByOrganisationId",
+          /*---Mool Admin APIs END---*/
+
+          /*---Mool Common APIs Start---*/
+          "GET user/check/organization/:username": "users.checkOrganization",
+          "POST user/create/organization": "users.createOrganisation",
+          "POST create/child/organization": "users.createChildOrganisation",
+          "GET authenticate/child/organization/:organisationId":
+            "users.authenticateChildOrganisation",
+          "POST user/auth_token/check": "users.checkAuthToken",
+          "POST attendance/auth_token/check": "users.checkAttendanceToken",
+          "GET organisation/children": "users.getChildOrganisations",
+
+          //Razorpay Routes
+          "POST razorpayorder/create": "razorpay.createOrder",
+          "POST razorpay/payment": "razorpay.InitiatePaymentDetails",
+          "POST razorpay/payment/response": "razorpay.getPaymentResponse",
+
+          //Organisation chargebee Routes
+          "POST org/chargebee/customer/new": "orgChargebee.addOrganisation",
+
+          "POST org/chargebee/customer/:organisationId/edit":
+            "orgChargebee.updateOrganizationChargebeeDetails",
+
+          "GET org/chargebee/getplan/:organisationId":
+            "orgChargebee.getPlanDetails",
+          "POST org/chargebee/addplan": "orgChargebee.addPlanTemporarily",
+
+          "DELETE org/chargebee/delete/:organisationID":
+            "orgChargebee.deleteOrganisationFromChargebee",
+
+          "POST org/chargebee/update/billingdetails":
+            "orgChargebee.addOrUpdateBillingInfoOfOrganisation",
+
+          "GET org/chargebee/planprice": "orgChargebee.getPriceOfPlan",
+
+          "POST org/chargebee/create": "orgChargebee.createSubscription",
+          "POST org/chargebee/delete/:organisationId":
+            "orgChargebee.deleteSubscription",
+          "GET org/chargebee/subscriptions/models":
+            "orgChargebee.getSubscriptionModels",
+
+          "GET org/chargebee/subscription/details": "orgChargebee.getPlanNames",
+          "GET org/chargebee/estimate/:organisationID":
+            "orgChargebee.getEstimationDetails",
+          "POST chargebee/create/paymentintent":
+            "orgChargebee.createPaymentIntent",
+
+          // Support api
+          "POST support/new/request": "support.newSupportRequest",
+          "GET support/from/requests/:id": "support.getAllSupportById",
+          "GET support/requests": "support.getAllSupport",
+          "PUT support/update/request": "support.updateStatus",
+          /*---Mool Common APIs END---*/
+
+          /*---Mool for CA Start---*/
+          "GET ca/organizations": "users.getMappedCAOrganisations",
+          "GET ca/users": "users.getMappedCAUsers",
+          "POST map/ca/organization": "users.mapCAToOrg",
+          "POST remove/ca/organization": "users.removeCAFromOrg",
+          "POST ca/user/update": "users.updateCAProfile",
+          "POST org/revoke/ca": "users.orgRevokeCA",
+          /*---Mool for CA End---*/
+
+          /*---Mool Org Unique Code Start---*/
+          "GET org/unique/code/:organisationId":
+            "orguniquecode.getOrganizationCode",
+          /*---Mool Org Unique Code End---*/
+
+          /*---Mool for CTC Start---*/
+          "POST org/create/ctc": "ctc.createCTC",
+          "POST org/update/ctc": "ctc.updateCTCObject",
+          "POST org/update/ctc/selectedIndex": "ctc.updateSelectedIndex",
+          "GET ctc/:id/:financialYear": "ctc.getCTC",
+          "GET ctc/:id/:financialYear/:month": "ctc.getCTCPayslipByMonth",
+          /*---Mool for CTC End---*/
+
+          /*---Mool Org payslip freeze start---*/
+          "GET org/freeze/info/:organisationId":
+            "payslipfreeze.getOrganizationCurrentFreezeInfo",
+          "GET payslip/freeze/:organisationId/:financialYear/:month":
+            "payslipfreeze.getPayslipFreezeByMonth",
+          "POST org/payslip/log": "payslipfreeze.addPayslipFreeze",
+          "PUT org/update/payslip/log": "payslipfreeze.updatePayrollFreeze",
+          "PUT org/update/payslip/mail": "payslipfreeze.freezeMailPayslip",
+          "GET org/payslip/all/:organisationId/:financialYear":
+            "payslipfreeze.getAllForOrg",
+          /*---Mool Org payslip freeze end---*/
+
+          /*---Document Upload feature Start---*/
+          "POST document/:type"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("upload.saveDocument", {
+                  files,
+                  fields: req.headers.authorization,
+                  type: req["$params"].type || "support",
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "GET document": "upload.getDocumentURL",
+          "DELETE document": "upload.removeS3Document",
+          /*---Document Upload feature End---*/
+          "GET org/info/:organisationId": "users.getOrgBasicInfo",
+
+          // User profile update
+          "GET user/exist/:key/:value": "users.existingUserCheck",
+          "PUT user/contact_info": "users.updateContactInfo",
+          "PUT user/basic_info": "users.updateBasicInfo",
+          "PUT user/bank_info": "users.updateBankInfo",
+          "PUT update/ip_details": "users.updateIPDetails",
+          "PUT update/coordinate": "users.updateCoordinatesDetails",
+          "PUT user/credentials_info": "users.updateUserCredentials",
+          "PUT user/structure": "users.updateMoolSettings",
+          "PUT user/document": "users.updateUserDocument",
+          "PUT user/address": "users.updateAddressInfo",
+          "PUT user/personal_info": "users.updateFamilyDetails",
+          "PUT employee/education/qualification":
+            "users.updateEducationAndQualificationDetails",
+          "PUT employee/nominee": "users.updateNomineeDetails",
+          "PUT employee/emergency/contact":
+            "users.updateEmergencyContactDetails",
+          "PUT organisation/business/dates": "users.updateBusinessDates",
+
+          /*---Auth API start--*/
+          "POST auth_check/reset/password":
+            "verification.initializeVerification",
+          "POST auth_check/verify/reset": "verification.verifyResetCode",
+          "POST auth_reset/reset/password": "verification.resetPassword",
+
+          "POST auth/edit/employee": "auth.editEmployee",
+          "POST auth/change/password": "auth.changePassword",
+          "POST org/change/password": "auth.orgChangePassword",
+          "POST auth/change/username/password":
+            "auth.changeUserNameAndPassword",
+
+          /*---Auth API end--*/
+
+          // Access control api
+          "PUT user/access": "users.updateUserAccess",
+          "PUT user/map": "users.updateMappedDetails",
+
+          "POST user/verify": "auth.verifyLoginDetails",
+          "GET user/from/email": "users.fetchUserByEmail",
+          "GET get/employee/by/:id": "users.fetchUserById",
+          "POST user/add/employee": "users.createEmployee",
+          "POST user/remove/employee": "users.removeFromOrg",
+          "POST user/set/password": "auth.setPassword",
+          "GET user/form/pan/:PAN": "users.getUserFromPAN",
+          "GET user/form/id/:id": "users.getUserFromId",
+          "GET user/form/email/:email": "users.getUserFromEmail",
+          "POST change/loginState": "users.changeLoginState",
+          "POST organisation/update/details": "users.updateOrganisationDetails",
+          "POST organisation/update/settings/perqs":
+            "users.updatePerquisitesInOrganisationSettings",
+          "DELETE organisation/:organisationId":
+            "users.removeOrganisationAndInstances",
+
+          "POST validate/payslip"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("payslips.validateAndExtractPayslip", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          // "POST fetch/excel/payslip"(req, res) {
+          // 	let form = new multiparty.Form();
+          // 	form.parse(req, (_err, _fields, files) => {
+          // 		this.broker.call("payslips.payslipExcelParser", { files, fields: req.headers.authorization, organisationId: req.$params.organisationId, month: req.$params.month, financialYear: req.$params.financialYear }).then(data => {
+          // 			res.setHeader("Content-Type", "Application/Json; charset=utf-8");
+          // 			res.writeHead(200);
+          // 			res.end(JSON.stringify(data));
+          // 		});
+          // 	});
+          // },
+          "POST auth/user/picture"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("users.savePicture", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          // weekly off api
+          "POST weekly_off": "weeklyOff.setWeeklyOff",
+          "GET weekly_off/:organisationId": "weeklyOff.getWeeklyOff",
+          "GET auth_bypass/weekly_off": "weeklyOff.createWeeklyOffsForGroups",
+          "GET weekly_off/:groupId/:organisationId":
+            "weeklyOff.getWeeklyOffByGroupIdAndOrganisationId",
+          "DELETE weekly_off/:groupId/:organisationId":
+            "weeklyOff.removeWeeklyOff",
+
+          "POST organisation/employee/list": "users.fetchEmployeeList",
+          "GET organisation/active/employee/list/:organisationId":
+            "users.fetchActiveEmployeeList",
+          "PUT organisation/settings": "users.updateOrganisationSettings",
+          "PUT update/organisation/allowance/:organisationId":
+            "users.updateSingleAllowance",
+          "DELETE remove/custom/allowance/:organisationId/:key":
+            "users.removeCustomAllowance",
+          "GET fetch/organisation_settings/:organisationId":
+            "users.fetchOrganisationSettings",
+
+          // Declarations
+          "GET employee/approved/12BB/:organisationId/:id/:financialYear":
+            "declarations.getApproved12BB",
+          "GET employee/declaration/:id/:financialYear":
+            "declarations.getDeclarationsById_FY",
+          "PUT employee/allowance_questions/:id/:financialYear":
+            "declarations.updateAllowanceConfigData",
+          "PUT employee/deduction": "declarations.updateDeduction",
+          "PUT employee/allowances":
+            "declarations.updateAllowancesAndCustomAllowances",
+          "PUT employee/houseRent": "declarations.updateHouseRent",
+          "PUT declaration/loan_details": "declarations.updateLoanDetails",
+          "PUT employee/update/12BB/:organisationId": "declarations.update12BB",
+          "PUT employee/percentage": "declarations.updatePercentageValue",
+          "PUT employee/advance/tax": "declarations.updateAdvanceTax",
+          "POST employee/declarations": "declarations.updateDeclarations",
+          "POST employee/perquisites": "declarations.updatePerquisites",
+
+          // Reimbursement
+          "GET reimbursement/employee/:id": "reimbursement.getReimbursement",
+          "GET reimbursement/employee/:id/:month/:financialYear":
+            "reimbursement.getEmployeeReimbursement",
+          "GET reimbursement/pending/org/:organisationId":
+            "reimbursement.getPendingReimbursement",
+          "GET reimbursement/org/:organisationId":
+            "reimbursement.getOrganisationReimbursement",
+          "GET manager/reimbursement":
+            "reimbursement.getReimbursementForManager",
+          "POST employee/add/reimbursements": "reimbursement.addReimbursement",
+          "POST update/reimbursements": "reimbursement.updateReimbursement",
+          "POST update/reimbursements/state":
+            "reimbursement.updateReimbursementState",
+          "POST verify/reimbursements": "reimbursement.verifyDocument",
+          "POST employee/upload/reimbursements"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("reimbursement.saveReimbursement", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "DELETE employee/reimbursements/:reimbursementId":
+            "reimbursement.deleteReimbursement",
+
+          // Proofs
+          "GET employee/proofs/:id": "proofs.getProofs",
+          "GET unapproved/proofs/count/:organisationId/:financialYear":
+            "proofs.getOrgProofCount",
+          "POST employee/add/proofs": "proofs.addProofs",
+          "POST proofs/by/category": "proofs.getProofByCategory",
+          "POST update/proofs": "proofs.updateProofs",
+          "POST verify/proof": "proofs.verifyDocument",
+          "GET get/unapproved/proof/:organisationId/:financialYear/:proofType":
+            "proofs.getUnApproved",
+          "GET get/proofs/:id/:financialYear": "proofs.getProofsById_FY",
+          "GET get/proofs/type/:id/:proofType/:financialYear":
+            "proofs.getProofByType",
+          "DELETE employee/proof/:proofId": "proofs.deleteProof",
+
+          // Month Close
+          "GET org/mclose/:organisationId": "mclose.getOrganisationMonthClose",
+          "GET employee/mclose/:id/:month/:financialYear":
+            "mclose.getEmployeeMonthCloseDetails",
+          "POST org/create/mclose/arrear": "mclose.createArrears",
+          "POST org/create/mclose": "mclose.addMonthClose",
+          "DELETE org/mclose/:_id": "mclose.deleteMonthClose",
+          "GET employee/lop/details/:id/:financialYear/:month":
+            "mclose.getEmployeeLOPDetails",
+          "PUT org/modify/emi-amount": "mclose.updateLoansAndAdvanceSalaryByID",
+          "PUT org/modify/overtime-amount": "mclose.updateOvertimeAmountByID",
+          "POST organisation/validate/monthclose/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validatedMcloseData", {
+                  files,
+                  fields: req.headers.authorization,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/:type/:financialYear/:month"(req, res) {
+            let form = new multiparty.Form();
+            const { financialYear, month, type } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateLOPOverdayDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  month,
+                  financialYear,
+                  type,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST monthclose/custom/parse/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { financialYear, month, organisationId } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateCustomMonthClose", {
+                  files,
+                  fields: req.headers.authorization,
+                  month,
+                  financialYear,
+                  organisationId,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/bonus/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { organisationId, financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateBonusDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  organisationId,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/address"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserAddressExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/ip_address"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.ipAddressParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/damage/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { organisationId, financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateDamageDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  organisationId,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/fine/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { organisationId, financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateFineDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  organisationId,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/overtime/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { organisationId, financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateOvertimeDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  organisationId,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST organisation/validate/accident/:organisationId/:financialYear/:month"(
+            req,
+            res
+          ) {
+            let form = new multiparty.Form();
+            const { organisationId, financialYear, month } = req["$params"];
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateAccidentDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                  organisationId,
+                  month,
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "GET organisation/monthclose/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateMonthCloseExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=MonthClose.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/bonus/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateBonusExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Bonus.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/accident/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateAccidentExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=accident.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/fine/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateFineExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Fine.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET  monthclose/generate/excel/lop/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateLOPExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=LOP.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/other/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateOtherCreditDebitExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Custom Month Close.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/csv/:type/:organisationId"(req, res) {
+            const { organisationId, type } = req.$params;
+            this.broker
+              .call("mclose.generateCSV", {
+                organisationId,
+                type,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=${type}.csv`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET declaration/excel/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            console.log(organisationId);
+            this.broker
+              .call("services.generateDeclarationExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                console.log(instruction);
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Declaration_Sync.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET all/employee/csv/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateAllEmployeeCsv", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=All_Employee.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "POST all/employee/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parseAllEmployees", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          /* Services APIS */
+          "GET generate/document/hra/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateHRAExcelExample", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=HRA.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/familyDetails/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateFamilyDetailsExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Family_Details.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/ip/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateIPAddressExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=IP_Address.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/advance_tax/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateAdvanceTaxExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=AdvanceTax.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/regime/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateRegimeSelectionExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Regime_Selection.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/totalWorkingDays/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateTotalWorkingDaysExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=TotalWorkingDays.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/overtimeDays/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateOvertimeDaysExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=OvertimeDays.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/leave_credit/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateLeaveCreditExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Leave_Credit.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/joining_date/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateDateOfJoiningExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Joining_Info.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/bankInfo/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateBankInfoExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=BankInfo.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/employee_id/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.createEmployeeIdExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Employee_Id.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/credentials/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateCredentialsExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Credentials.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/contactInfo/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateContactInfoExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Contact Info.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/address/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateAddressExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=Address.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/emergencyContact/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateEmergencyContactExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Emergency Contact.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/nominee/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("services.generateNomineeExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=Nominee.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET config/upload/:type"(req, res) {
+            const { type } = req.$params;
+            this.broker
+              .call("services.downloadConfigurationFiles", {
+                type,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=File.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET attendance/excel/:organisationId/:month/:year"(req, res) {
+            const { organisationId, month, year } = req.$params;
+            this.broker
+              .call("employeeDetails.createAttendanceExcel", {
+                organisationId,
+                month,
+                year,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=AttendanceExcel.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/allowances/:organisationId/:groupId"(
+            req,
+            res
+          ) {
+            const { organisationId, groupId } = req.$params;
+            this.broker
+              .call("services.generateAllowancesExcel", {
+                organisationId,
+                groupId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=Allowances.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/percentage/:organisationId/:groupId"(
+            req,
+            res
+          ) {
+            const { organisationId, groupId } = req.$params;
+            this.broker
+              .call("services.generatePercentageExcel", {
+                organisationId,
+                groupId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=Percentage.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/maternity/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateMaternityCSV", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=Maternity.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "POST parser/declarations"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.declarationParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/totalWorkingDays/:month/:year"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.totalWorkingDaysExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                  month: req.$params.month,
+                  year: req.$params.year,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/overtimeDays/:month/:year"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.overtimeDaysExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                  month: req.$params.month,
+                  year: req.$params.year,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/employee_id"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserEmployeeIdDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/hra"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.hraExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/advance_tax"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.advanceTaxParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/regime_selection"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.regimeExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/leave_credit"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.leaveCreditExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/joining_date"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.dateOfJoiningParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/attendance/:month/:financialYear"(req, res) {
+            let form = new multiparty.Form();
+            const { month, financialYear } = req.$params;
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("employeeDetails.parserAttendanceExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                  month: parseInt(month),
+                  financialYear,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/maternity"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("mclose.validateMaternityDetails", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/allowances/:groupId"(req, res) {
+            const { groupId } = req.$params;
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.allowancesParser", {
+                  files,
+                  fields: req.headers.authorization,
+                  groupId,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/percentage/:groupId"(req, res) {
+            const { groupId } = req.$params;
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.percentageParser", {
+                  files,
+                  fields: req.headers.authorization,
+                  groupId,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "GET payslip/pdf/:id/:financialYear/:month"(req, res) {
+            const { id, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.getPayslipPDF", {
+                id,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=payslip-${
+                    monthList[parseInt(month)]
+                  }.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+          // Full And Final
+          "GET organisation/final/settlement/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("settlement.getOrganisationFinalSettlementFile", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=final settlement.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          // Full And Final
+          "GET org/fnf/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("settlement.generateFinalSettlementCsv", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=full and final settlement.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "POST update/joining/date": "users.updateJoiningDate",
+          "PUT update/totalWorkingDays": "users.updateTotalWorkingDays",
+          "PUT update/overtimeDays": "users.updateOvertimeDays",
+          "POST update/employee_id": "users.updateEmployeeId",
+          "GET employee/settlement/:id": "settlement.getFinalSettlement",
+          "GET org/settlements/close/fnf/:organisationId":
+            "settlement.closeFinalAndFinal",
+          "GET org/settlements/:organisationId":
+            "settlement.getOrganisationFinalSettlements",
+          "POST org/create/settlement": "settlement.createFinalSettlement",
+          "POST org/update/settlement": "settlement.updateFinalSettlement",
+          "GET org/update/status/:id/:status": "settlement.changeStatus",
+          "GET org/process/fnf/:organisationId":
+            "settlement.processFullAndFinal",
+          "DELETE org/settlement/:id/:organisationId":
+            "settlement.deleteFinalSettlement",
+          "GET org/settlements/:organisationId/:month/:year":
+            "settlement.getFNFByMonthAndYear",
+          "GET get/settlement/by/:id": "settlement.getSettlementById",
+          "GET get/settlement/:organisationId":
+            "settlement.getSettlementByOrganisationId",
+          "GET employee/declaration/:id": "declarations.getDeclarations",
+          "POST employee/eula": "users.updateEula",
+          "PUT employee/regime": "users.updateRegime",
+
+          "POST employee/payslip": "payslips.createPayslip",
+          "GET employee/payslip/counter/:organisationId/:month/:financialYear":
+            "payslips.payslipCounter",
+          "GET employee/payslips/:id": "payslips.getPayslips",
+          "GET organisation/allowances/:organisationId":
+            "users.getOrganisationAllowances",
+          "GET employee/payslip/current/:id": "payslips.getCurrentPayslip",
+          "GET employee/payslip/:id/:month/:financialYear":
+            "payslips.getPayslipById",
+          "POST employee/overtime/amount": "mclose.getEmployeeOvertimeAmount",
+          "POST org/upload/payslips":
+            "payslips.uploadEmployeePreviousPayslipData",
+          "GET employee/info/:id/:month/:financialYear":
+            "users.fetchEmployeeInformation",
+          "GET employee/attendance/info/:PAN": "users.getEmployeeInfo",
+          "GET organisation/payslipInfo/:organisationId":
+            "payslips.getCurrentMonthPayslipInfo",
+          "GET organisation/payslip/:organisationId":
+            "payslips.getPayslipsByOrgId",
+          "DELETE current/payslip/:id": "payslips.deleteCurrentPayslip",
+          "GET organisation/total/ctc/:organisationId": "ctc.getTotalCTC",
+          "GET organisation/json/:organisationId/:month/:financialYear":
+            "payslips.generatePayslipInstructionsJSON",
+          "GET employee/payslips/:id/:financialYear":
+            "payslips.getPayslipsByFinancialYear",
+          "PUT employee/update/preference/:id": "users.updateUserPreferences",
+
+          //accessKey
+          "POST organisation/apiKey":
+            "apiAccessControl.generateAccessKeyIDAndAccessKeySecret",
+          "DELETE organisation/apiKey/:appID/:organisationID":
+            "apiAccessControl.deleteAccessKeyIDAndAccessKeySecret",
+          "GET organisation/apiKey/:organisationID":
+            "apiAccessControl.viewApplicationList",
+
+          "GET organisation/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.generateInstructions", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Salary_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET organisation/pf/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.generatePFInstructions", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=PF_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          //? Report Generator bankadvice, ctcMonthly, ctcYearly, ytd,
+          "GET bankadvice/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.bankAdvice", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Bank_Advice_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET bankadvice/json/:organisationId/:month/:financialYear":
+            "payslips.bankAdviceJSON",
+          "GET ctc/monthly/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.monthlyCTC", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Monthly_CTC_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET reimbursement/report/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("reimbursement.reimbursementReport", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Reimbursement_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET organisation/tds/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.generateTDSInstructions", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=TDS_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET organisation/profTax/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, month, financialYear } = req.$params;
+            this.broker
+              .call("payslips.generateProfessionalTaxInstructions", {
+                organisationId,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Profession_Tax_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET organisation/csv/payslip/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("payslips.getPayslipStructureCSV", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Override_Payroll.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET organisation/payslip/existing/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("payslips.getExistsPayslipStructureCSV", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=PayslipStructure.csv",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET payslip/statutory_bonus/csv/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("payslips.statutoryBonusReport", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Statutory_Bonus_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET payslip/dynamic/:organisationId/:reportId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, financialYear, month, reportId } =
+              req.$params;
+            this.broker
+              .call("payslips.dynamicReportGeneration", {
+                organisationId,
+                financialYear,
+                month,
+                reportId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Payslip_Dynamic_${
+                    monthList[parseInt(month)]
+                  }.csv`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET employee_bulk/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("users.exampleBulkExcelEmployee", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Employee_Bulk_Sample.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/document/ctc/:organisationId/:financialYear"(req, res) {
+            const { organisationId, financialYear } = req.$params;
+            this.broker
+              .call("ctc.ctcExcelGenerator", {
+                organisationId,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=CTC.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "POST parser/ctc"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("ctc.ctcExcelParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          "GET payslip/dynamic/json/:organisationId/:reportId/:month/:financialYear":
+            "payslips.dynamicJsonReport",
+          "GET payslip/statutory_bonus/:organisationId/:month/:financialYear":
+            "payslips.statutoryBonus",
+
+          // YearlyCTC
+          "GET ctc/csv/yearly/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("ctc.yearlyCTCCSV", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Yearly CTC Report.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET ctc/yearly/:organisationId/:month/:financialYear":
+            "ctc.yearlyCTC",
+
+          // Month Close and reimbursement
+          "GET mclose/csv/:organisationId/:month/:financialYear"(req, res) {
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("mclose.getOrganisationMonthCloseReport", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Arrears_Bonuses_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET mclose/:organisationId/:month/:financialYear":
+            "mclose.getEmployeeMonthCloseReportData",
+          "GET mclose/lopdays/:id/:month/:financialYear":
+            "mclose.getMcloseLopDays",
+          "GET reimbursement/:organisationId/:month/:financialYear":
+            "reimbursement.getCurrentReimbursement",
+          "GET all/reimbursement/:organisationId/:month/:financialYear":
+            "reimbursement.getAllReimbursement",
+
+          // Get Pay register Data
+          "GET payslip/pay_register/:organisationId/:month/:financialYear":
+            "payslips.payRegister",
+          "GET payslip/excel/:organisationId/:month/:financialYear"(req, res) {
+            console.log(req.$params);
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("payslips.payslipRegister", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Salary_Register_${
+                    monthList[parseInt(month)]
+                  }.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+
+          // YTD CSV
+          "GET payslip/csv/ytd/:organisationId/:month/:financialYear"(
+            req,
+            res
+          ) {
+            const { organisationId, financialYear, month } = req.$params;
+            this.broker
+              .call("payslips.ytdEarningsCSV", {
+                organisationId,
+                financialYear,
+                month,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Year_Till_Date.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET payslip/ytd/:organisationId/:month/:financialYear":
+            "payslips.ytdEarnings",
+
+          // Subscription APIS
+          "POST organisation/create/update/subscription":
+            "subscription.saveOrUpdateSubscription",
+          "GET organisation/subscriptions/by/:organisationId":
+            "subscription.getSubscriptionByOrganisationId",
+
+          // MoolDhan
+          "POST mooldhan": "mooldhan.saveMoolDhan",
+          "POST mooldhan/transfer": "mooldhan.transfer",
+          // "POST mooldhan/deduct": "mooldhan.deduct",
+          "POST mooldhan/deduct/bulk": "mooldhan.deductOnBulk",
+          "GET mooldhan/:organisationId": "mooldhan.getMoolDhanByOrganisation",
+
+          // Payment Gateway for mooldhan
+          "POST new/order": "paymentGateway.createOrder",
+          "GET get/order/link/:orderId": "paymentGateway.getOrderLink",
+          "GET get/order/details/:orderId": "paymentGateway.getOrderDetails",
+          "GET get/order/status/:orderId": "paymentGateway.getOrderStatus",
+
+          //Transactions
+          "GET mooldhan/get/transactions/:organisationId":
+            "transaction.getTransactionsByOrg",
+
+          //Payslip send mail
+          "GET payslip/send/mail/:id/:month/:financialYear":
+            "payslips.singlePayslipSendMail",
+          "GET payslip/send/html/:id/:month/:financialYear"(_req, res) {
+            const { id, month, financialYear } = _req.$params;
+            this.broker
+              .call("payslips.sendPayslipHTML", {
+                id,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "text/html",
+                });
+                res.end(instruction);
+              });
+          },
+
+          "GET payslip/send/mail/:organisationId": "payslips.payslipSendMail",
+
+          // Groups
+          "POST groups": "groups.newGroup", // User create own group
+          "POST groups/create": "groups.groupCreation", // Org create child group
+          "PUT groups": "groups.updateGroup",
+          "PUT groups/overtimeSetting": "groups.updateGroupOvertimeSetting",
+          "GET groups/employees": "users.getAllEmployeesInGroups",
+          "GET groups": "groups.getGroupsOfOrganisation",
+          "GET group/:groupId/:organisationId": "groups.getGroupByGroupId",
+          "GET groups/:organisationId": "groups.getGroupsByOrgId",
+          "DELETE remove/group/:groupId": "groups.deleteGroupByGroupId",
+          "DELETE remove/group/by/org/:organisationId":
+            "groups.deleteGroupsForOrg",
+
+          // Advertisement
+          "POST new/campaign": "ads.newCampaign",
+          "POST upload/campaign"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("ads.saveAddsDocs", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "PUT update/campaign/:adId": "ads.updateCampaignByAdId",
+          "GET get/campaign": "ads.getAllCampaign",
+          "GET target/campaign/:targeting": "ads.getByTarget",
+          "GET get/campaign/:adId": "ads.getCampaignById",
+          "DELETE remove/campaign/:adId": "ads.deleteCampaignByadId",
+          "DELETE remove/campaign/document/:Key": "ads.deleteAddDocument",
+
+          // Broadcasting APIS
+          "POST new/broadcast": "broadcast.newBroadcast",
+          "GET get/broadcast/:status": "broadcast.getByStatus",
+          "GET get/broadcast/:status/:messageStatus":
+            "broadcast.getByMessageStatus",
+          "PUT update/broadcast/:broadcastId": "broadcast.updateBroadcast",
+          "DELETE remove/broadcast/:broadcastId":
+            "broadcast.deleteBroadcastByBId",
+
+          // Department APIS
+          "POST department": "department.createOrManageDepartment",
+          "POST departments": "department.addDepartmentBulk",
+          "GET department/by/:departmentId":
+            "department.getDepartmentByDepartmentID",
+          "GET departments/:organisationId":
+            "department.getAllDepartmentsByOrganisationId",
+          "DELETE remove/department/by/:departmentId":
+            "department.deleteDepartment",
+          "GET user/department/by/:departmentId":
+            "users.getEmployeesFromDepartment",
+          "POST user/assign/to/department": "users.assignEmployeeToDepartment",
+          "POST user/assign/to/department/bulk":
+            "users.assignEmployeeToDepartmentInBulk",
+          "DELETE remove/user/from/department/:PAN/:departmentId":
+            "users.removeDepartmentFromUser",
+          "DELETE remove/user/from/department/bulk/:departmentId":
+            "users.removeDepartmentFromUserInBulk",
+          "POST department/bulk/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("department.departmentBulkParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          // Status APIS
+          "POST status": "status.createOrManageStatus",
+          "GET status/:organisationId": "status.getAllStatusesByOrganisationId",
+          "GET status/by/:statusId": "status.getStatusByStatusID",
+          "DELETE status/:statusId": "status.deleteStatus",
+          "GET user/status/by/:statusId": "users.getEmployeesFromStatus",
+          "GET user/employees/by/:groupId": "users.getEmployeesFromGroup",
+          "PUT user/assign/to/group": "users.assignEmployeeToGroup",
+          "POST user/assign/to/status": "users.assignEmployeeToStatus",
+          "POST user/assign/to/status/bulk":
+            "users.assignEmployeeToStatusInBulk",
+          "DELETE remove/user/from/status/:PAN/:statusId":
+            "users.removeStatusFromUser",
+          "DELETE remove/user/from/status/bulk/:statusId":
+            "users.removeStatusFromUserInBulk",
+          "POST statuses": "status.addStatusBulk",
+          "POST status/bulk/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("status.statusBulkParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          // Attendance System
+          "POST punch/in": "attendance.punchIn",
+          "POST punch/out": "attendance.punchOut",
+          "POST log/attendance": "attendance.createFullAttendance",
+          "POST log/absent/attendance": "attendance.markAttendanceAbsent",
+          "PUT org/attendance/status/change":
+            "attendance.updateStatusOfAttendance",
+          "GET attendance/by/:id/:month/:year":
+            "attendance.getAllAttendanceForMonthAndYearByUserId",
+          "GET org/attendance/by/:organisationId/:month/:year":
+            "attendance.getAllAttendanceForMonthAndYearByOrg",
+          "GET org/unapproved/attendance/by/:organisationId":
+            "attendance.getUnApprovedAttendance",
+          "GET org/attendance/by/:organisationId/:day/:month/:year":
+            "attendance.getAllAttendanceForDateByOrg",
+          "GET org/attendance/by/manager/:PAN":
+            "attendance.getAllAttendanceByManager",
+          "GET fetch/employee/attendance/by/:id":
+            "users.getEmployeeAttendanceInfo",
+          "DELETE delete/attendance": "attendance.deleteAttendanceForDay",
+          "GET attendance/today/:id": "attendance.getTodaysAttendance",
+          "GET attendance/pdf/:id"(_req, res) {
+            const { id } = _req.$params;
+            this.broker
+              .call("attendance.getTodaysAttendancePDF", { id })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Attendance_Report.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET daily/attendance/pdf/:organisationId/:day/:month/:year"(
+            _req,
+            res
+          ) {
+            const { organisationId, day, month, year } = _req.$params;
+            this.broker
+              .call("attendance.getDailyAttendancePDFOrg", {
+                organisationId,
+                day,
+                month,
+                year,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Attendance_Daily_Report.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET attendance/monthly/pdf/:organisationId/:month/:year"(_req, res) {
+            const { organisationId, month, year } = _req.$params;
+            this.broker
+              .call("attendance.monthlyReportPDF", {
+                organisationId,
+                month,
+                year,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Attendance_Monthly_Report.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET get/document/tax/pdf/:id/:month/:financialYear"(_req, res) {
+            const { id, month, financialYear } = _req.$params;
+            this.broker
+              .call("services.getTaxProjectionPdf", {
+                id,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Tax_Projection.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+
+          //Month Report Attendance APIS
+          "GET attendance/report/by/:id/:month/:year":
+            "monthlyReport.getMonthReportByUserId",
+          "GET org/attendance/report/by/:organisationId/:month/:year":
+            "monthlyReport.getMonthReportByOrg",
+          "GET org/csv/report/by/:organisationId/:month/:year"(req, res) {
+            const { organisationId, month, year } = req.$params;
+            this.broker
+              .call("monthlyReport.getMonthReportCSVByOrg", {
+                organisationId,
+                month,
+                year,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Attendance Report.csv",
+                });
+                res.end(instruction);
+              });
+          },
+
+          "GET monthly/offs/:PAN/:month/:year": "monthlyReport.getMissedLogins",
+
+          // Holiday APIS
+          "POST new/holiday": "holiday.createHoliday",
+          "PUT holiday/month/year/:organisationId":
+            "holiday.getHolidaysForMonthAndYear",
+          "PUT holiday/year/:organisationId": "holiday.getHolidaysForYear",
+          "DELETE holiday/:holidayId": "holiday.deleteHoliday",
+
+          // Org Leaves APIS
+          "POST org/new/leave": "leaveConfig.createLeave",
+          "POST leave/create/:organisationId":
+            "leaveConfig.createBlankOrgLeave",
+          "GET org/leaves/:organisationId": "leaveConfig.getOrgLeaves",
+          "GET org/admin/leave": "leaveConfig.allOrgLeaves",
+          "DELETE org/leave/:organisationId/:leaveId":
+            "leaveConfig.deleteLeave",
+
+          // Employee leaves APIS
+          "POST new/leave": "leaveInfo.createEmployeeLeave",
+          "POST credit/leave/balance": "leaveInfo.creditLeaveBalance",
+          "POST credit/leave": "leaveInfo.creditLeave",
+          "POST credit/bulk/leave": "leaveInfo.creditLeaveInBulk",
+          "GET leaves/by/:id": "leaveInfo.getEmployeeLeaves",
+          "GET leaves/report/:organisationId": "leaveInfo.leaveBalanceReport",
+          "GET leaves/encashable/by/:id": "leaveInfo.getEncashableLeaveBalance",
+          // Designation APIS
+          // Employee leave Logs APIS
+          "POST request/leave": "leaveApplications.requestLeave",
+          "PUT leave/status/:organisationId":
+            "leaveApplications.acceptOrRejectLeave",
+          "GET leaves/logs/manager/:PAN/:organisationId":
+            "leaveApplications.leaveRetrieveFromManager",
+          "GET leave/logs/by/:id/:organisationId":
+            "leaveApplications.getAllLeaveRequestsOfEmployee",
+          "GET leave/logs/by/:organisationId":
+            "leaveApplications.getAllEmployeeLeaveRequestsByOrg",
+          "GET leave/logs/by/status/:organisationId/:status":
+            "leaveApplications.getAllLeaveByOrgStatus",
+          "GET leave/logs/by/status/user/:id/:status":
+            "leaveApplications.getAllLeaveByIdStatus",
+          "GET leave/logs/by/manager/status/:PAN/:status":
+            "leaveApplications.getAllLeavesByManagerAndStatus",
+          // Designation APIS
+          "POST designation": "designation.createOrManageDesignation",
+          "POST designations": "designation.addDesignationBulk",
+          "GET designations": "designation.getAllDesignations",
+          "GET designations/:organisationId":
+            "designation.getAllDesignationsByOrganisationId",
+          "GET designation/by/:designationId":
+            "designation.getDesignationByDesignationID",
+          "DELETE remove/designation/by/:designationId":
+            "designation.deleteDesignation",
+          "GET user/designation/by/:designationId":
+            "users.getEmployeesFromDesignation",
+          "POST user/assign/to/designation":
+            "users.assignEmployeeToDesignation",
+          "POST user/assign/to/designation/bulk":
+            "users.assignEmployeeToDesignationInBulk",
+          "DELETE remove/user/from/designation/:PAN/:designationId":
+            "users.removeDesignationFromUser",
+          "DELETE remove/user/from/designation/bulk/:designationId":
+            "users.removeDesignationFromUserInBulk",
+          "POST designation/bulk/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("designation.designationBulkParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          // Location APIS
+          "POST location": "location.createOrManageLocation",
+          "GET locations/:organisationId":
+            "location.getAllLocationsByOrganisationId",
+          "GET location/by/:locationId": "location.getLocationByLocationID",
+          "DELETE remove/location/by/:locationId": "location.deleteLocation",
+          "GET user/location/by/:locationId": "users.getEmployeesFromLocation",
+          "POST user/assign/to/location": "users.assignEmployeeToLocation",
+          "POST user/assign/to/location/bulk":
+            "users.assignEmployeeToLocationInBulk",
+          "DELETE remove/user/from/location/:PAN/:locationId":
+            "users.removeLocationFromUser",
+          "DELETE remove/user/from/location/bulk/:locationId":
+            "users.removeLocationFromUserInBulk",
+          "GET location/in/area/:locationId/:latitude/:longitude":
+            "location.checkIfLocationIsInArea",
+
+          "POST invoice/pdf": "transaction.createInvoicePDF",
+
+          //Org
+          "POST payout/new/organisationInstance":
+            "organisationInstance.createOrgInstance",
+          "GET payout/get/organisationInstance/:organisationId":
+            "organisationInstance.getPublicData",
+          "PUT payout/update/organisationInstance":
+            "organisationInstance.updateOrgInstance",
+          "POST payout/verify/bankAccount":
+            "organisationInstance.backAccountVerification",
+          //"get org-detail to org"
+
+          //Beneficiary service APIs
+          "POST payout/add/beneficiary": "beneficiary.addBeneficiary",
+          "GET payout/beneficiary/:id": "beneficiary.getBeneficiary",
+          "DELETE payout/remove/beneficiary/:organisationId/:id":
+            "beneficiary.removeBeneficiary",
+          // "PUT payout/update/beneficiary/:organisationId": "beneficiary.addBeneficiary",
+          // write update beneficiary
+          "GET payout/beneficiaries/:organisationId":
+            "beneficiary.getOrgBeneficiaries",
+          "POST payout/bulk/beneficiary/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("beneficiary.beneficiaryBulkParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "GET payout/bulk/csv/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("beneficiary.beneficiarySampleCSV", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=Beneficiaries.csv",
+                });
+                res.end(instruction);
+              });
+          },
+
+          "GET user/separation ": "cronjobs.userSeparation",
+
+          //"get all bene"
+
+          // Transfer APIs
+          "POST payout/transfer": "transfer.transfer",
+          "GET payout/transfer/status/:organisationId/:transferId":
+            "transfer.transferStatus",
+          "POST payout/batch/transfer/:organisationId":
+            "transfer.batchTransfer",
+          "GET payout/batch/transfer/status/:organisationId/:batchTransferId":
+            "transfer.batchTransferStatus",
+          "PUT payout/transfer/test": "transfer.transferTest",
+          "GET payout/all/by/:organisationId/:month/:year":
+            "transfer.getAllTransfersByMonthAndYear",
+          "GET payout/all/by/:organisationId/:year": "transfer.getAllTransfers",
+          "GET cashfree/transfer/status/:organisationId/:referenceId/:transferId":
+            "transfer.cashfreeStatus",
+          "GET cashfree/balance/:organisationId":
+            "organisationInstance.getCashfreeAccountBalance",
+
+          // Organisation Report Payslip
+          "POST new/org/report": "orgReport.newOrgReport",
+          "GET get/org/report/by/:organisationId":
+            "orgReport.getReportByOrganisation",
+          "GET get/report/by/:reportId": "orgReport.getReportByReportId",
+          "DELETE remove/report/by/:reportId":
+            "orgReport.deleteReportByReportId",
+
+          // Organisation Freeze APIs
+          "POST freeze": "freeze.createFreeze",
+          "PUT freeze": "freeze.updateFreeze",
+          "PUT check/blocked/payroll": "freeze.checkIfEmployeePayrollBlocked",
+          "GET employees/blocked/payroll/:organisationId/:month/:financialYear":
+            "freeze.getPayrollBlockedEmployees",
+          "PUT blocked/payroll": "freeze.updateBlockedPayrolls",
+          "GET freeze/:organisationId/:financialYear":
+            "freeze.getOrganisationFreeze",
+
+          // Compliances APIs
+          "POST compliance": "compliance.createComplianceForAdmin",
+          "PUT compliance": "compliance.updateCompliance",
+          "GET compliance/:organisationId/:financialYear/:month":
+            "compliance.getCompliance",
+          "GET compliances": "compliance.getAllCompliances",
+
+          // complianceCredentials.getOrgComplainceCrdentials
+          // Compliance credentials apis
+          "POST compliance/credential":
+            "complianceCredentials.saveOrUpdateComplianceCredentials",
+          "GET compliance/credential/:organisationId/:PAN":
+            "complianceCredentials.getComplianceCredential", // by admin
+          "GET compliance/credentials/:organisationId":
+            "complianceCredentials.getAllComplianceCredentialsByOrgId", // by admin
+          "GET compliance/credentials":
+            "complianceCredentials.getAllComplianceCredentials", // by admin
+          "DELETE compliance/credential/:organisationId/:PAN":
+            "complianceCredentials.removeComplianceCredential", // by admin
+
+          // Onboarding APIS
+          "POST new/onboarding": "onboarding.newOnboarding",
+          "POST update/onboarding": "onboarding.updateOnboardingFields",
+          "GET fetch/onboarding/:organisationId/:id":
+            "onboarding.getOnboardData",
+
+          "GET previous/employment/:id/:financialYear":
+            "previousEmployment.getPreviousEmployment",
+          "POST previous/employment/fresh-joinee":
+            "previousEmployment.createNewJoinee",
+          "POST previous/employment/update":
+            "previousEmployment.updatePreviousEmployment",
+          "POST previous/employment": "previousEmployment.createUpdate",
+          "DELETE previous/employment/:id/:financialYear/:employerId":
+            "previousEmployment.deletePreviousEmployment",
+
+          "POST mool/payslip/calculation": "services.moolPayslipCalculation",
+          "POST fetch/mool/payslip/graph": "services.payslipCalculationObject",
+
+          // Settlement services
+          "POST employee/tax/settlement":
+            "employeeTaxSettlement.previousTaxSettlement",
+          "POST update/settlement/allowances":
+            "employeeTaxSettlement.updateAllowance",
+          "POST update/settlement/deductions":
+            "employeeTaxSettlement.updateDeduction",
+          "POST update/settlement/perquisites":
+            "employeeTaxSettlement.updatePerquisites",
+          "POST action/notify/settlement":
+            "employeeTaxSettlement.notifyPreviousSettlement",
+          "GET organisation/settlement/:organisationId/:financialYear":
+            "employeeTaxSettlement.getOrganisationTaxSettlement",
+
+          "POST employee/excel/bulk/parser"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("users.createExcelBulkParser", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+
+          // csv generator
+          "GET generate/document/:type/:organisationId"(req, res) {
+            const { organisationId, type } = req.$params;
+            this.broker
+              .call("services.createDetailsUpdateCSV", {
+                organisationId,
+                type,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=${type}.csv`,
+                });
+                res.end(instruction);
+              });
+          },
+
+          "POST parser/bank_info"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserBankInfoExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/nominee"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserNomineeCSV", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/education_qualification"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserEducationAndQualificationCSV", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/family_details"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserFamilyDetailsExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/emergency_contact"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserEmergencyContactExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/contact_info"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserContactInfoExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          "POST parser/credentials"(req, res) {
+            let form = new multiparty.Form();
+            form.parse(req, (_err, _fields, files) => {
+              this.broker
+                .call("services.parserCredentialsExcel", {
+                  files,
+                  fields: req.headers.authorization,
+                })
+                .then((data) => responseModel(data, res));
+            });
+          },
+          // Employee Details Page
+          "POST employee/details": "employeeDetails.createEmployeeDetails",
+          "PUT employee/attendance/details":
+            "employeeDetails.updateAttendanceInfo",
+          "GET employee/details/:id/:financialYear/:month":
+            "employeeDetails.getEmployeeDetails",
+          "GET employee/details/org/:organisationId/:financialYear/:month":
+            "employeeDetails.getEmployeesDetails",
+
+          // Beginning of ReportsGenerator
+          "GET get/report/apis/:organisationId/:financialYear/:month/:stateCode":
+            "reports.getOrgReportsAPISByStateCode",
+          "GET generate/org/reports/:category/:organisationId/:financialYear/:month/:type/:stateCode"(
+            req,
+            res
+          ) {
+            const {
+              organisationId,
+              financialYear,
+              month,
+              type,
+              category,
+              stateCode,
+            } = req.$params;
+            this.broker
+              .call("reports.generateOrganisationComplianceReports", {
+                organisationId,
+                financialYear,
+                month,
+                type,
+                category,
+                stateCode,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=" +
+                    category.toUpperCase() +
+                    "." +
+                    type,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET generate/employee/reports/:category/:id/:financialYear/:month"(
+            req,
+            res
+          ) {
+            const { id, category, month, financialYear } = req.$params;
+            this.broker
+              .call("reports.generateEmployeeComplianceReports", {
+                id,
+                category,
+                month,
+                financialYear,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition":
+                    "attachment; filename=" + category.toUpperCase() + ".pdf",
+                });
+                res.end(instruction);
+              });
+          },
+          // Terms And Conditions API
+
+          "POST save/termsAndConditions":
+            "termsAndConditions.saveTermsAndConditions",
+
+          "GET fetch/keyExistsInTermsAndConditions/:organisationId/:keyName":
+            "termsAndConditions.fetchKeyExistsInTermsAndConditions",
+
+          //End of ReportsGenerator
+
+          "GET get/latest/payslip/:id/:financialYear/:month":
+            "payslips.getLatestPayslip",
+          "POST create/org/basic/info": "orgDetails.createOrgDetails",
+          "GET get/org/basic/info/:organisationId": "orgDetails.getOrgDetails",
+          // Contact Us Page
+          "POST contact_us": "contact.sendMessage",
+          "GET contact": "contact.getAllMessage",
+          "GET reform": "users.reformFinancialYearData",
+          "POST single/mclose/lop": "mclose.singleLOPOverdayDetails",
+          "GET migrate/org/settlement":
+            "settlement.processSeparationOfClearedEmployees",
+
+          // Loans and Adv Salary
+          "POST loan/advance-salary":
+            "loanAndAdvSalary.createNewLoanOrAdvanceSalary",
+          "GET loan/advance-salary/:ID":
+            "loanAndAdvSalary.getLoanOrAdvanceSalaryByID",
+          "GET loans/advance-salaries/user/:ID":
+            "loanAndAdvSalary.getLoanOrAdvanceSalaryByUserID",
+          "GET loans/advance-salaries/:organisationID":
+            "loanAndAdvSalary.getLoanOrAdvanceSalaryByOrganisationID",
+          "DELETE loan/advance-salary/:ID":
+            "loanAndAdvSalary.deleteLoanOrAdvanceSalaryByID",
+
+          // Form 16 Generation
+          "GET form16B/generation/:PAN/:financialYear":
+            "form16.generateForm16PartB",
+          "GET form16B/generation/pdf"(_req, res) {
+            this.broker
+              .call("services.form16Generation")
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Form16B.pdf`,
+                });
+                res.end(instruction);
+              });
+          },
+          // Tax Functions
+          "POST mool/generate/payslip": "tax.generatePayslip",
+          "GET tax/projection/:id/:financialYear/:month":
+            "tax.createTaxProjection",
+
+          // Perquisites
+          "POST multiple/specified/employees":
+            "specifiedEmployees.multipleSpecifiedEmployees",
+          "POST specified/employee": "specifiedEmployees.saveSpecifiedEmployee",
+          "GET specified/employees/:organisationID":
+            "specifiedEmployees.getAllSpecifiedEmployeesOfOrganisation",
+          "GET specified/employee/:ID":
+            "specifiedEmployees.getSpecifiedEmployeeByID",
+
+          // Club And Expenses Perks
+          "POST save/clubExpenditure": "clubExpenditure.saveClubExpenditure",
+          "GET fetch/clubExpenditure/:organisationId/:financialYear":
+            "clubExpenditure.getClubExpenditure",
+          "DELETE remove/clubExpenditure/:id/:financialYear/:type":
+            "clubExpenditure.deletePerquisite",
+
+          // Concessional Ticket Perks
+          "POST save/concessionalTicket":
+            "concessionalTicket.saveConcessionalTicket",
+          "GET fetch/concessionalTicket/:organisationId/:financialYear":
+            "concessionalTicket.getConcessionalTicket",
+
+          // Concessional Education Perks
+          "POST save/concessionalEducation":
+            "concessionalEducation.saveConcessionalEducation",
+          "GET fetch/concessionalEducation/:organisationId/:financialYear":
+            "concessionalEducation.getConcessionalEducation",
+          "DELETE remove/concessionalEducation/:id/:financialYear/:type":
+            "concessionalEducation.deletePerquisite",
+
+          // Credit card Expenses Perks
+          "POST save/creditCardExpenses":
+            "creditCardExpenses.saveCreditCardExpenses",
+          "GET fetch/creditCardExpenses/:organisationId/:financialYear":
+            "creditCardExpenses.getCreditCardExpenses",
+
+          // Domestic Servants Perks
+          "POST save/domesticServant": "domesticServant.saveDomesticServant",
+          "GET fetch/domesticServant/:organisationId/:financialYear":
+            "domesticServant.getDomesticServant",
+          "DELETE remove/domesticServant/:id/:financialYear/:type/:servantId":
+            "domesticServant.deletePerquisite",
+
+          // Free Food And Beverages Perks
+          "POST save/freeConcessionalFoodAndBeverages":
+            "freeConcessionalFoodAndBeverages.saveFreeConcessionalFoodAndBeverages",
+          "GET fetch/freeConcessionalFoodAndBeverages/:organisationId/:financialYear":
+            "freeConcessionalFoodAndBeverages.getFreeConcessionalFoodAndBeverages",
+          "DELETE remove/deletePerquisite/:id/:financialYear/:type":
+            "freeConcessionalFoodAndBeverages.deletePerquisite",
+
+          // Gas And Electric Perks
+          "POST save/gasElectricityWater":
+            "gasElectricWater.saveGasElectricWaterPerquisites",
+          "GET fetch/gasElectricityWater/:organisationId/:financialYear":
+            "gasElectricWater.getGasElectricWaterPerquisites",
+
+          // Gift and Token Perks
+          "POST save/giftAndTokenInLieu":
+            "giftAndTokenInLieu.saveGiftAndTokenInLieu",
+          "GET fetch/giftAndTokenInLieu/:organisationId/:financialYear":
+            "giftAndTokenInLieu.getGiftAndTokenInLieu",
+          "DELETE remove/giftAndTokenInLieu/:id/:financialYear":
+            "giftAndTokenInLieu.deletePerquisite",
+
+          // Interest Free Concessional Loan Perks
+          "POST save/interestFreeConcessionalLoan":
+            "interestFreeConcessionalLoan.saveInterestFreeConcessionalLoan",
+          "GET fetch/interestFreeConcessionalLoan/:organisationId/:financialYear":
+            "interestFreeConcessionalLoan.getInterestFreeConcessionalLoan",
+          "DELETE remove/interestFreeConcessionalLoan/:id/:financialYear/:type":
+            "interestFreeConcessionalLoan.deletePerquisite",
+
+          // Movable Asset Perks
+          "POST save/movableAssets": "movableAssets.saveMovableAssets",
+          "GET fetch/movableAssets/:organisationId/:financialYear":
+            "movableAssets.getMovablePerquisites",
+          "DELETE remove/movableAssets/:id/:financialYear/:type/:assetId":
+            "movableAssets.deletePerquisite",
+
+          // Other Benefits and Amenities Perks
+          "POST save/otherBenefitsOrAmenity":
+            "otherBenefitsOrAmenity.saveOtherBenefitsOrAmenity",
+          "GET fetch/otherBenefitsOrAmenity/:organisationId/:financialYear":
+            "otherBenefitsOrAmenity.getOtherBenefitsOrAmenity",
+
+          // Specified Security Perks
+          "POST save/specifiedSecurityNotBeingEquityShare":
+            "specifiedSecurityNotBeingEquityShare.saveSpecifiedSecurityNotBeingEquityShare",
+          "GET fetch/specifiedSecurityNotBeingEquityShare/:organisationId/:financialYear":
+            "specifiedSecurityNotBeingEquityShare.getSpecifiedSecurityNotBeingEquityShare",
+          "DELETE delete/equityFromList/:id/:financialYear/:equityId":
+            "specifiedSecurityNotBeingEquityShare.deleteEquityFromList",
+
+          // Transfer Of Movable Assets Perks
+          "POST save/transferOfMovableAssets":
+            "transferOfMovableAssets.saveTransferOfMovableAssets",
+          "GET fetch/transferOfMovableAssets/:organisationId/:financialYear":
+            "transferOfMovableAssets.getTransferOfMovableAssets",
+          "DELETE remove/transferOfMovableAssets/:id/:financialYear/:type/:assetId":
+            "transferOfMovableAssets.deletePerquisite",
+
+          // Traveling and Touring Assets Perks
+          "POST save/travelingTouringAccommodation":
+            "travelingTouringAccommodation.saveTravelingTouringAccommodation",
+          "GET fetch/travelingTouringAccommodation/:id/:financialYear":
+            "travelingTouringAccommodation.getTravelingTouringAccommodation",
+
+          // Motor Cars Perks
+          "POST save/motorCars": "motorCars.saveMotorCars",
+          "GET fetch/motorCars/:organisationId/:financialYear":
+            "motorCars.getMotorCars",
+
+          // Residential Perks
+          "POST save/residentialAccommodation":
+            "residentialAccommodation.saveResidentialAccommodation",
+          "GET fetch/residentialAccommodation/:organisationId/:financialYear":
+            "residentialAccommodation.getResidentialAccommodation",
+          "GET fetch/amount/:id/:financialYear/:month":
+            "clubExpenditure.getPerquisitesAmount",
+
+          // Minimum Wages
+          "POST minimumWages/save-structure":
+            "minWages.saveMinimumWagesStructure",
+          "POST minimumWages/general-structure":
+            "minWages.getStructureOfMinWages",
+          "GET minimumWages/input-fields/:stateCode":
+            "minWages.getInputsAccordingToLocation",
+          "GET minimumWages/current-structure/:id":
+            "minWages.getUpdatedStructureOfPayslip",
+          "GET minimumWages/existing-structure/:id/:financialYear":
+            "minWages.getExistingStructure",
+          "PUT minimumWages/update-applicable": "minWages.updateApplicable",
+          "GET minimumWages/employee-list/:organisationId":
+            "minWages.getAllEmployeesAccordingToMinWages",
+
+          // Organisation Settings
+          "PUT set/esic/settings": "users.updateESIC_Configurations",
+
+          //TODO: Remove these after conversion
+          // Conversion API
+          // "GET add/employeeId/to/employees": "users.assignEmployeeIdToEveryone",
+          // "GET migrate/complaince/access": "users.addComplainceAccessToUser",
+          "GET migrate/org/settings": "users.migrateOrganisationSettings",
+
+          //Attendance;
+          // "GET migrate/update/attendances_user": "attendance.updateAllAttendanceUserModels",
+          // //Leaves;
+          // "GET migrate/update/leave_info_users": "leaveInfo.updateUserModels",
+          // "GET migrate/update/leave_app_users": "leaveApplications.updateAllLeaveApplicationUserModels",
+          // "GET migrate/update/monthly_report_users": "monthlyReport.updateAllMonthlyReportModels",
+          // // Declarations
+
+          // "GET migrate/update/declarations_users": "declarations.updateAllDeclarationUserModels",
+          "GET migrate/allowance/declarations_users":
+            "declarations.migrateAllDeclarationUserModels",
+
+          // // ctc
+          // "GET migrate/update/ctc_users": "ctc.updateUserModels",
+          // // mclose
+          // "GET migrate/update/mclose_users": "mclose.updateAllMcloseUserModels",
+          // // settlement
+          // "GET migrate/update/settlement_users": "settlement.updateAllSettlementUserModels",
+          // // payslip
+          // "GET migrate/update/payslip_users": "payslips.updateAllPayslipUserModels",
+          // "GET migrate/update/payslip_users":
+          //   "payslips.updateAllPayslipUserModels",
+          // // reimbursement
+          // "GET migrate/update/reimbursement_users": "reimbursement.updateAllReimbursementUserModels",
+          // // employee Details
+          // "GET migrate/update/emp_details_users": "employeeDetails.updateAllEmployeeDetailsUserModels",
+          // // Proofs Details
+          // "GET migrate/update/proofs_users": "proofs.updateAllProofUserModels",
+          // // Employee Tax Settlement Details
+          // "GET migrate/update/emp_tax_settlement_users": "employeeTaxSettlement.updateAllTaxSettlementsUserModels",
+          // // Previous Employment Details
+          // "GET migrate/update/rebalancing_users": "previousEmployment.updateAllRebalancingUserModels",
+          // // Freeze  Details
+          "GET migrate/update/freeze_users_model":
+            "freeze.updateAllFreezeUserModels",
+          // // onboarding  Details
+          // "GET migrate/update/onboarding_model": "onboarding.updateAllOnboardingUserModels",
+          // // groups  Details
+          // "GET migrate/update/groups_model": "groups.updateAllGroupsUserModels",
+          // // orguniquecode  Details
+          // "GET migrate/update/orguniquecode_model": "orguniquecode.updateAllOrgUniqueCodeUserModels",
+          // // subscription  Details
+          // "GET migrate/update/subscription_model": "subscription.updateAllSubscriptionUserModels",
+          // // Support  Details
+          // "GET migrate/update/support_model": "support.updateAllSupportUserModels",
+          // // User To AUth  Details
+          // "GET migrate/update/user_auth_conversion": "users.convertAllUsersToAuth",
+          // // Conversion
+          // "GET migrate/convert/leaves": "leaveConfig.leaveConversion",
+
+          /* Logs API */
+          "POST log": "logs.newLog",
+          "GET logs/org/:organisationId": "logs.getLogsByOrganisationId",
+          "GET logs/user/:userId": "logs.getLogsByUserId",
+          "GET logs/org/:organisationId/:category":
+            "logs.getLogsByOrganisationIdAndCategory",
+          "GET logs/user/:userId/:category": "logs.getLogsByUserIdAndCategory",
+          "GET log/:id": "logs.getLogById",
+          "GET logs/:userId/:dateTime": "logs.getLogsForDay",
+        },
+      },
+    ],
+
+    // Serve assets from "public" folder
+    assets: {
+      folder: "public",
+    },
+  },
+  methods: {
+    authenticate(token) {
+      return jwt.verify(token, jwtSecret);
+    },
+  },
+};
