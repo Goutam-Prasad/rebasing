@@ -1,0 +1,2039 @@
+const Cryptr = require("cryptr");
+const csvParser = require("csvtojson");
+const validator = require("validator");
+
+// Local Requires
+const DbService = require("../mixins/db.mixins");
+const responseMixin = require("../mixins/response.mixins");
+const { MIN_WAITING_TIME } = require("../utils/config");
+const csvFormats = require("../utils/constant");
+const {
+  createHRAExcelDropDown,
+  createBankInfoExcel,
+  createCredentialsExcel,
+  createOldNewRegimeExcel,
+  createAdvanceTaxExcel,
+  createDateOfJoiningExcel,
+  createLeaveCreditExcel,
+  createEmployeeIdBulk,
+  createFamilyDetails,
+  createIPAddressExcel,
+  createTotalWorkingDays,
+  createOvertimeDays,
+  createDeclarationsExcel,
+  createContactInfoExcel,
+  createAddressExcel,
+  createEmergencyContactExcel,
+  createNomineeExcel,
+  createAllowanceExcel,
+  createPercentageStructureExcel,
+} = require("../utils/createExcel");
+const {
+  declarations: declarationTemplate,
+} = require("../utils/declarationTemplate.js");
+const errors = require("../utils/errorConfig");
+const {
+  getExcelData,
+  getExcelDataOfAllSheets,
+} = require("../utils/excelToJson");
+const { taxProjection } = require("../utils/pdf/htmlPdfTemplates");
+const generateForm16B = require("../utils/pdfForm16B");
+const generatePDFTables = require("../utils/pdfFromHtml");
+const {
+  camelToSpaceSeparated,
+  spaceSeparatedToCamel,
+  isNumeric,
+} = require("../utils/utility");
+const { delay } = require("../utils/utility");
+const config = require("../utils/config");
+const { askMool } = require("../utils/tax_projection");
+// Constant Declaration Area
+const cryptr = new Cryptr(config.env.CRYPT_SECRET);
+const configTypes = {
+  department: "Department Name",
+  designation: "Designation Name",
+  status: "Status Name",
+};
+
+// Broker Object
+module.exports = {
+  name: "services",
+  mixins: [DbService("services"), responseMixin],
+  actions: {
+    moolPayslipCalculation: {
+      async handler(ctx) {
+        try {
+          const paramPayslip = ctx.params;
+          return askMool(paramPayslip).then((res) => res.data.finalPayslip);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    payslipCalculationObject: {
+      async handler(ctx) {
+        try {
+          const paramPayslip = ctx.params;
+          const res = await askMool(paramPayslip);
+          const data = res.data.graphData;
+          const graphArray = [];
+          data.forEach((key) => {
+            key.forEach((item) => {
+              if (typeof item === "object") {
+                const { employee_PF, employer_PF, employer_ESI, employee_ESI } =
+                  item;
+                const parsedAdvanceTax = isNaN(parseInt(item.advanceTax))
+                  ? 0
+                  : item.advanceTax;
+                graphArray.push({
+                  newRegime: {
+                    incomeTax: item.newRegime.incomeTax + parsedAdvanceTax,
+                    takeHome: item.newRegime.takeHome,
+                  },
+                  oldRegime: {
+                    incomeTax: item.oldRegime.incomeTax + parsedAdvanceTax,
+                    takeHome: item.oldRegime.takeHome,
+                  },
+                  savings:
+                    employee_ESI + employer_ESI + employer_PF + employee_PF,
+                  employee_PF,
+                  employer_PF,
+                  employer_ESI,
+                  employee_ESI,
+                });
+              }
+            });
+          });
+          return graphArray;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    createDetailsUpdateCSV: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId", "type"], ctx.params))
+            return "";
+          const { organisationId, type } = ctx.params;
+          let csv = csvFormats[type];
+          if (!csv) {
+            return "";
+          }
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          for (let user of users) {
+            const { username, currentOrganisationMeta, displayName } = user;
+            csv += `${currentOrganisationMeta.employeeId},${displayName},${username}\n`;
+          }
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+
+    // TODO: All the common CSV paser should have only one function
+    parserAddressExcel: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          // const addressJSON = await csvParser().fromFile(files.file[0].path);
+          const addressJSON = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of addressJSON) {
+            if (!item.UserName) continue;
+            const existUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!existUser) continue;
+            const { currentOrganisationMeta, username, displayName, _id } =
+              existUser;
+            const obj = {
+              employeeId: currentOrganisationMeta.employeeId,
+              displayName,
+              username,
+              id: _id,
+              address: {
+                present: {
+                  addressLineOne: item.Present_AddressLineOne,
+                  addressLineTwo: item.Present_AddressLineTwo,
+                  landmark: item.Present_Landmark,
+                  city: item.Present_City,
+                  state: item.Present_State,
+                  pincode: item.Present_PinCode,
+                  country: item.Present_Country,
+                },
+                permanent: {
+                  addressLineOne: item.Permanent_AddressLineOne,
+                  addressLineTwo: item.Permanent_AddressLineTwo,
+                  landmark: item.Permanent_Landmark,
+                  city: item.Permanent_City,
+                  state: item.Permanent_State,
+                  pincode: item.Permanent_PinCode,
+                  country: item.Permanent_Country,
+                },
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserIP_AddressCSV: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          const ipDetails = await csvParser().fromFile(files.file[0].path);
+          const dataList = [];
+          for (let item of ipDetails) {
+            if (!item.UserName) continue;
+            const userDetails = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userDetails) continue;
+            const { currentOrganisationMeta, username, displayName, _id } =
+              userDetails;
+            const obj = {
+              employeeId: currentOrganisationMeta.employeeId,
+              displayName,
+              username,
+              id: _id,
+              ip: validator.isIP(item.IP_Address) ? item.IP_Address : "",
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserBankInfoExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const bankInfoJson = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of bankInfoJson) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              Account_Number,
+              IFSC,
+              Bank_Name,
+              Bank_Address,
+              City,
+              State,
+              PinCode,
+            } = item;
+            if (!item.UserName) continue;
+            const employeeExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: UserName,
+              }
+            );
+            if (!employeeExist) continue;
+            const obj = {
+              id: employeeExist._id,
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: employeeExist.username,
+              bankInfo: {
+                accountNumber: Account_Number || "",
+                ifsc: IFSC,
+                bankName: Bank_Name,
+                bankAddress: Bank_Address,
+                city: City,
+                state: State,
+                pinCode: PinCode,
+                country: "India",
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserNomineeExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          const nomineeJSON = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of nomineeJSON) {
+            if (!item.UserName) continue;
+            const userExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userExist) continue;
+            const obj = {
+              id: userExist._id,
+              employeeId: item.EmployeeId,
+              displayName: item.EmployeeName,
+              username: userExist.username,
+              nominee: {
+                nomineeOne: {
+                  name: item.Nominee_One_Name,
+                  relationship: item.Nominee_One_Relationship,
+                  otherRelationship: item.Nominee_One_OtherRelationship,
+                  dateOfBirth: isNaN(
+                    new Date(item.Nominee_One_DateOfBirth).getTime()
+                  )
+                    ? ""
+                    : new Date(item.Nominee_One_DateOfBirth),
+                  aadhaar: !isNaN(Number(item.Nominee_One_Aadhaar))
+                    ? Number(item.Nominee_One_Aadhaar)
+                    : "",
+                },
+                nomineeTwo: {
+                  name: item.Nominee_Two_Name,
+                  relationship: item.Nominee_Two_Relationship,
+                  otherRelationship: item.Nominee_Two_OtherRelationship,
+                  dateOfBirth: isNaN(
+                    new Date(item.Nominee_Two_DateOfBirth).getTime()
+                  )
+                    ? ""
+                    : new Date(item.Nominee_Two_DateOfBirth),
+                  aadhaar: !isNaN(Number(item.Nominee_Two_Aadhaar))
+                    ? Number(item.Nominee_Two_Aadhaar)
+                    : "",
+                },
+                nomineeThree: {
+                  name: item.Nominee_Three_Name,
+                  relationship: item.Nominee_Three_Relationship,
+                  otherRelationship: item.Nominee_Three_OtherRelationship,
+                  dateOfBirth: isNaN(
+                    new Date(item.Nominee_Three_DateOfBirth).getTime()
+                  )
+                    ? ""
+                    : new Date(item.Nominee_Three_DateOfBirth),
+                  aadhaar: !isNaN(Number(item.Nominee_Three_Aadhaar))
+                    ? Number(item.Nominee_Three_Aadhaar)
+                    : "",
+                },
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserEducationAndQualificationCSV: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          const educationAndQualificationJSON = await csvParser().fromFile(
+            files.file[0].path
+          );
+          const dataList = [];
+          for (let item of educationAndQualificationJSON) {
+            if (!item.UserName) continue;
+            const userExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userExist) continue;
+            const obj = {
+              id: userExist._id,
+              employeeId: item.EmployeeId,
+              displayName: item.EmployeeName,
+              username: userExist.username,
+              educationAndQualification: {
+                degree: item.Degree,
+                collegeName: item.CollegeName,
+                university: item.University,
+                address: item.Address,
+                startDate: isNaN(new Date(item.Start_Date).getTime())
+                  ? ""
+                  : new Date(item.Start_Date),
+                endDate: isNaN(new Date(item.End_Date).getTime())
+                  ? ""
+                  : new Date(item.End_Date),
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          return [];
+        }
+      },
+    },
+    // TODO: Make a excel parser
+    parserFamilyDetailsExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const familyDetailsJSON = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of familyDetailsJSON) {
+            if (!item.UserName) continue;
+            const userExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userExist) continue;
+            let spouseEmploymentStatus = this.getBooleanResult(
+              item.Spouse_Employment_Status
+            );
+            let isFatherDisabled = this.getBooleanResult(
+              item.Is_FatherDisabled
+            );
+            let isMotherDisabled = this.getBooleanResult(
+              item.Is_Mother_Disabled
+            );
+            const obj = {
+              id: userExist._id,
+              employeeId: item.EmployeeId,
+              displayName: item.EmployeeName,
+              username: userExist.username,
+              familyDetails: {
+                phoneNumber: item.Phone_Number,
+                dateOfBirth: isNaN(new Date(item.Date_Of_Birth).getTime())
+                  ? ""
+                  : new Date(item.Date_Of_Birth),
+                gender: item.Gender,
+                spouseName: item.Spouse_Name,
+                spouseDOB: item.Spouse_DOB,
+                fathersName: item.Fathers_Name,
+                mothersName: item.Mothers_Name,
+                fathersDOB: isNaN(new Date(item.Fathers_DOB).getTime())
+                  ? ""
+                  : new Date(item.Fathers_DOB),
+                mothersDOB: isNaN(new Date(item.Mothers_DOB).getTime())
+                  ? ""
+                  : new Date(item.Mothers_DOB),
+                isMotherDisabled,
+                isFatherDisabled,
+                spouseEmploymentStatus,
+                maritalStatus: item.Marital_Status,
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserEmergencyContactExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          // const emergencyContactJson = await csvParser().fromFile(
+          //   files.file[0].path
+          // );
+          const emergencyContactJson = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of emergencyContactJson) {
+            let contactNo = item.ContactNo;
+            if (isNaN(parseInt(contactNo))) {
+              contactNo = "";
+            }
+            if (!item.UserName) continue;
+            const userExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userExist) continue;
+            const obj = {
+              id: userExist._id,
+              employeeId: item.EmployeeId,
+              displayName: item.EmployeeName,
+              username: userExist.username,
+              emergencyContact: {
+                name: item.Name,
+                relationship: item.Relationship,
+                address: item.Address,
+                contactNo,
+                countryCode: item.CountryCode,
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserContactInfoExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          // const contactInfoJSON = await csvParser().fromFile(
+          //   files.file[0].path
+          // );
+          const contactInfoJSON = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of contactInfoJSON) {
+            let personalPhone = item.Personal_Phone;
+            if (isNaN(Number(personalPhone))) {
+              personalPhone = "";
+            }
+            if (!item.UserName) continue;
+            const userExist = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!userExist) continue;
+            const obj = {
+              id: userExist._id,
+              employeeId: item.EmployeeId,
+              displayName: item.EmployeeName,
+              username: userExist.username,
+              contactInfo: {
+                personalPhone,
+                skypeId: item.Skype_Id,
+                linkedIn: item.LinkedIn,
+                slackUser: item.Slack_User,
+                personalEmail: item.Personal_Email,
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    parserCredentialsExcel: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const user = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (user.role !== "org") {
+            return [];
+          }
+          const credentialInfo = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of credentialInfo) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              Aadhaar_Number,
+              Passport_Number,
+              UAN,
+              UANPassword,
+              DrivingLicenseNumber,
+              PFNo,
+              VoterID,
+              ESICNumber,
+            } = item;
+            if (!UserName) continue;
+            const existUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!existUser) continue;
+            const obj = {
+              id: existUser._id,
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: existUser.username,
+              credentials: {
+                aadhaar: Aadhaar_Number,
+                passportNumber: Passport_Number,
+                UAN: UAN,
+                UANPassword: UANPassword,
+                drivingLicenseNumber: DrivingLicenseNumber,
+                PFNo: PFNo,
+                voterID: VoterID,
+                esicNumber: ESICNumber,
+              },
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          console.log(err);
+          return [];
+        }
+      },
+    },
+    generateDeclarationCSV: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          let csvCamelString =
+            "EmployeeId,EmployeeName,Username,fiveYearFixedDepositScheduledBank,childrenTuitionFees,depositInNSC,depositInNSS,depositInPostOfficeSavingsSchemes,equityLinkedSavingsScheme,infrastructureBonds,interestReinvestedNSC,kisanVikasPatra,lifeInsurancePremium,longTermInfrastructureBonds,mutualFunds,ruralBondsNABARD,nationalPensionScheme,schemeNHB,postOfficeTimeDepositForFiveYears,pradhanMantriSurakshaBimaYojana,publicProvidentFund,repaymentOfHousingLoanPrincipal,stampDutyAndRegistrationCharges,sukanyaSamriddhiYojana,unitLinkedInsurancePremium,contributionPensionFund,preventiveHealthCheckupDependantParents,medicalBillsVerySeniorCitizen,medicalInsurancePremiumBelow60,medicalInsurancePremium60YearsAndAbove,medicalInsurancePremiumDependantParentsBelow60,medicalInsurancePremiumDependantParents60YearsAbove,preventiveHealthCheckUp,medicalTreatmentOrInsuranceHandicappedDependant,medicalTreatmentOrInsuranceSevereHandicappedDependant,medicalTreatmentSpecifiedDisease,medicalTreatmentSpecifiedDiseaseSeniorCitizen,medicalTreatmentSpecifiedDiseaseVerySeniorCitizen,permanentPhysicalDisabilityBelow40Prcnt,permanentPhysicalDisabilityAbove40Prcnt,contributionNPS2015_CCD1B,rajivGandhiEquityScheme,interestLoanHigherSelfEducation,additionalInterestOnHousingLoanBorrowed1stApr2016,additionalInterestOnHousingLoanBorrowed1stApr2019,interestOnElectricVehicleBorrowed1stApr2019,interestSavingsAccountDepositFDPostOfficeCooperativeSociety,interestSavingsAccountDepositFDPostOfficeCooperativeSocietySeniorCitizen,donation100PrcntExemption,donation50PrcntExemption,donationChildrenEducation,donationPoliticalParties,preConstructionHomeLoanInterest,currentYearHomeLoanInterest\n";
+          let csv = csvCamelString
+            .split(",")
+            .map((item) => camelToSpaceSeparated(item))
+            .join(",");
+
+          employeeList.map((value) => {
+            let arrayZero = new Array(51).fill(0);
+            let fiftyZero = arrayZero;
+            csv +=
+              value["currentOrganisationMeta"]["employeeId"] +
+              "," +
+              value.displayName +
+              "," +
+              value.username +
+              "," +
+              fiftyZero +
+              "\n";
+          });
+          return csv;
+        } catch (e) {
+          this.logger.error(e.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generateAllowancesCSV: {
+      async handler(ctx) {
+        try {
+          let { organisationId, groupId } = ctx.params;
+
+          let csv = "EmployeeId,EmployeeName,UserName";
+
+          let allowanceGroup = await this.getGroupAllowances(
+            groupId,
+            organisationId
+          );
+          if (!allowanceGroup) {
+            return csv;
+          }
+
+          // Convert the general groups into actual group id.
+          if (groupId === "general") {
+            groupId = "";
+          }
+          let employeeList = await this.broker.call(
+            "users.getAllEmployeesInGroups",
+            {
+              groupId,
+              organisationId,
+            }
+          );
+
+          let { allowances, customAllowances } = allowanceGroup;
+          let allowancesKey = Object.keys(allowances);
+          let cAllowancesKey = Object.keys(customAllowances);
+          let totalAllowanceCount = 0;
+          allowancesKey.forEach((val) => {
+            if (allowances[val].applicable) {
+              csv += `,${val}`;
+              totalAllowanceCount++;
+            }
+          });
+          cAllowancesKey.forEach((val) => {
+            if (customAllowances[val].applicable) {
+              csv += `,${val}`;
+              totalAllowanceCount++;
+            }
+          });
+          csv += "\n";
+
+          employeeList.map((value) => {
+            if (
+              (groupId === "general" && value.groupId === "") ||
+              groupId === value.groupId
+            ) {
+              let arrayZero = new Array(totalAllowanceCount).fill(0);
+              let zeros = arrayZero;
+              csv +=
+                value["currentOrganisationMeta"]["employeeId"] +
+                "," +
+                value.displayName +
+                "," +
+                value.username +
+                "," +
+                zeros +
+                "\n";
+            }
+          });
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generatePercentageExcel: {
+      async handler(ctx) {
+        try {
+          let { groupId, organisationId } = ctx.params;
+          console.log(ctx.params);
+          let csv = "EmployeeId,EmployeeName,UserName,Basic,HRA,Buffer";
+          let allowanceGroup = await this.getGroupAllowances(
+            groupId,
+            organisationId
+          );
+          if (!allowanceGroup) {
+            return csv;
+          }
+          let { percentage } = allowanceGroup;
+
+          // Convert the general groups into actual group id.
+          if (groupId === "general") {
+            groupId = "";
+          }
+
+          let employeeList = await this.broker.call(
+            "users.getAllEmployeesInGroups",
+            {
+              groupId,
+              organisationId,
+            }
+          );
+          const { allowances, customAllowances } = percentage;
+          // let data = `${basic},${hra},${buffer},`;
+          return createPercentageStructureExcel(
+            employeeList,
+            allowances,
+            customAllowances,
+            percentage
+          );
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generatePercentageCSV: {
+      async handler(ctx) {
+        try {
+          let { groupId, organisationId } = ctx.params;
+          let csv = "EmployeeId,EmployeeName,UserName,Basic,HRA,Buffer";
+          let allowanceGroup = await this.getGroupAllowances(
+            groupId,
+            organisationId
+          );
+          if (!allowanceGroup) {
+            return csv;
+          }
+          let { percentage } = allowanceGroup;
+
+          // Convert the general groups into actual group id.
+          if (groupId === "general") {
+            groupId = "";
+          }
+
+          let employeeList = await this.broker.call(
+            "users.getAllEmployeesInGroups",
+            {
+              groupId,
+              organisationId,
+            }
+          );
+          const { basic, hra, allowances, customAllowances, buffer } =
+            percentage;
+          let data = `${basic},${hra},${buffer},`;
+          let allowancesKey = Object.keys(allowances);
+          let cAllowancesKey = Object.keys(customAllowances);
+          allowancesKey.forEach((val) => {
+            console.log("VAl ", val);
+            console.log("seperated Val ", camelToSpaceSeparated(val));
+            csv += `,${camelToSpaceSeparated(val)}`;
+            data += `${
+              allowances[val] && allowances[val]["value"]
+                ? allowances[val]["value"] + ","
+                : "0,"
+            }`;
+          });
+          cAllowancesKey.forEach((val) => {
+            csv += `,${camelToSpaceSeparated(val)}`;
+            data += `${
+              customAllowances[val] && customAllowances[val]["value"]
+                ? customAllowances[val]["value"] + ","
+                : "0,"
+            }`;
+          });
+          employeeList.map((value) => {
+            if (
+              (groupId === "general" && value.groupId === "") ||
+              groupId === value.groupId
+            ) {
+              csv +=
+                "\n" +
+                value["currentOrganisationMeta"]["employeeId"] +
+                "," +
+                value.displayName +
+                "," +
+                value.username +
+                "," +
+                data;
+            }
+          });
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generateFamilyDetailsExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createFamilyDetails(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+
+    generateBankInfoExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createBankInfoExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+
+    generateCredentialsExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createCredentialsExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+
+    generateRegimeSelectionExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createOldNewRegimeExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateTotalWorkingDaysExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createTotalWorkingDays(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateOvertimeDaysExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createOvertimeDays(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateDeclarationExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createDeclarationsExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateContactInfoExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createContactInfoExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateAddressExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createAddressExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateEmergencyContactExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createEmergencyContactExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateNomineeExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createNomineeExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateAllowancesExcel: {
+      async handler(ctx) {
+        try {
+          let { organisationId, groupId } = ctx.params;
+          let allowanceGroup = await this.getGroupAllowances(
+            groupId,
+            organisationId
+          );
+          if (!allowanceGroup) {
+            return ""; //if no groupID the return empty
+          }
+
+          // Convert the general groups into actual group id.
+          if (groupId === "general") {
+            groupId = "";
+          }
+          let employeeList = await this.broker.call(
+            "users.getAllEmployeesInGroups",
+            {
+              groupId,
+              organisationId,
+            }
+          );
+
+          let { allowances, customAllowances } = allowanceGroup;
+          let allowancesKey = Object.keys(allowances);
+          let cAllowancesKey = Object.keys(customAllowances);
+          return createAllowanceExcel(
+            allowances,
+            customAllowances,
+            allowancesKey,
+            cAllowancesKey,
+            employeeList
+          );
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateIPAddressExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createIPAddressExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateAdvanceTaxExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createAdvanceTaxExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateLeaveCreditExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          const leaves = await this.broker.call("leaveConfig.getOrgLeaves", {
+            organisationId,
+          });
+          let leaveDetails = [];
+          if (leaves && leaves.leaveTypes) {
+            leaveDetails = Object.values(leaves.leaveTypes);
+          }
+          return createLeaveCreditExcel(employeeList, leaveDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    generateHRAExcelExample: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createHRAExcelDropDown(employeeList);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    hraExcelParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const HRAData = getExcelData(files.file[0].path);
+          const parsedHRAData = [];
+          for (let hra of HRAData) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              RENT_AMOUNT,
+              METRO_CITY,
+            } = hra;
+            if (!UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const hraObject = {
+              id: currentUser._id,
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+            };
+            if (!RENT_AMOUNT) {
+              hraObject["houseRent"] = {
+                rent: 0,
+                isMetro: false,
+                ownerPAN: "",
+                applicable: false,
+              };
+            } else {
+              hraObject["houseRent"] = {
+                rent: isNumeric(RENT_AMOUNT) ? Math.ceil(RENT_AMOUNT) : 0,
+                isMetro:
+                  isNumeric(RENT_AMOUNT) &&
+                  (!METRO_CITY || METRO_CITY.toLowerCase()) === "no"
+                    ? false
+                    : true,
+                ownerPAN: "",
+                applicable: isNumeric(RENT_AMOUNT) ? true : false,
+              };
+            }
+            parsedHRAData.push(hraObject);
+          }
+          return parsedHRAData;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    totalWorkingDaysExcelParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields, month, year } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const totalWorkingDaysList = getExcelData(files.file[0].path);
+          const parsedTotalWorkingDays = [];
+          for (let twd of totalWorkingDaysList) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              TotalWorkingDays: totalWorkingDays,
+            } = twd;
+            if (!UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const twdObject = {
+              id: currentUser._id,
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              month: parseInt(month),
+              year: parseInt(year),
+              totalWorkingDays: parseInt(totalWorkingDays),
+            };
+            parsedTotalWorkingDays.push(twdObject);
+          }
+          return parsedTotalWorkingDays;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    overtimeDaysExcelParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields, month, year } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const overtimeDaysList = getExcelData(files.file[0].path);
+          const parsedOvertimeDays = [];
+          for (let overtime of overtimeDaysList) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              OvertimeDays: overtimeDays,
+            } = overtime;
+            if (!UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const ovrObject = {
+              id: currentUser._id,
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              month: parseInt(month),
+              year: parseInt(year),
+              overtimeDays: parseInt(overtimeDays),
+            };
+            parsedOvertimeDays.push(ovrObject);
+          }
+          return parsedOvertimeDays;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    allowancesParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields, groupId } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const allowancesCSVData = await csvParser().fromFile(
+            files.file[0].path
+          );
+          let allowanceGroup = getExcelData(groupId, userData.organisationId);
+          if (!allowanceGroup) {
+            return [];
+          }
+          let { allowances, customAllowances } = allowanceGroup;
+          let allowancesKey = Object.keys(allowances);
+          let cAllowancesKey = Object.keys(customAllowances);
+          let employeeAllowanceResult = [];
+          let isMoolStructure =
+            userData.moolSettings && userData.moolSettings.structureOfMool
+              ? userData.moolSettings.structureOfMool
+              : false;
+          let searchGroupId = groupId === "general" ? "" : groupId;
+          for (let empData of allowancesCSVData) {
+            if (!empData.UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: empData.UserName,
+              }
+            );
+            if (!currentUser || currentUser.groupId !== searchGroupId) {
+              continue;
+            }
+            let singleEmployeeData = {
+              username: currentUser.username,
+              id: currentUser._id,
+              organisationId: currentUser.organisationId,
+              employeeId: empData.EmployeeId,
+              displayName: empData.EmployeeName,
+              allowances: {},
+              customAllowances: {},
+            };
+            allowancesKey.forEach((val) => {
+              if (allowances[val].applicable) {
+                let singleAllowancesObject = {
+                  ...allowances[val],
+                  amount: isMoolStructure
+                    ? parseInt(empData[val])
+                      ? parseInt(empData[val])
+                      : 0
+                    : allowances[val].amount,
+                  actualExpense: parseInt(empData[val])
+                    ? parseInt(empData[val])
+                    : 0,
+                  meta: {},
+                };
+                singleEmployeeData.allowances[val] = {
+                  ...singleAllowancesObject,
+                };
+              }
+            });
+            cAllowancesKey.forEach((val) => {
+              if (customAllowances[val].applicable) {
+                let singleAllowancesObject = {
+                  ...allowances[val],
+                  amount: isMoolStructure
+                    ? parseInt(empData[val])
+                      ? parseInt(empData[val])
+                      : 0
+                    : customAllowances[val].amount,
+                  actualExpense: parseInt(empData[val])
+                    ? parseInt(empData[val])
+                    : 0,
+                };
+                singleEmployeeData.customAllowances[val] = {
+                  ...singleAllowancesObject,
+                };
+              }
+            });
+            employeeAllowanceResult.push(singleEmployeeData);
+          }
+
+          return employeeAllowanceResult;
+        } catch (err) {
+          this.logger.error(err.message || errors.deleteError);
+          return [];
+        }
+      },
+    },
+    percentageParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields, groupId } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          // const percentageCSVData = await csvParser().fromFile(
+          //   files.file[0].path
+          // );
+          const percentageCSVData = getExcelData(files.file[0].path);
+          let allowanceGroup = await this.getGroupAllowances(
+            groupId,
+            userData.organisationId
+          );
+          if (!allowanceGroup) {
+            return [];
+          }
+          let { percentage } = allowanceGroup;
+          let { allowances, customAllowances } = percentage;
+          let allowancesKey = Object.keys(allowances);
+          let cAllowancesKey = Object.keys(customAllowances);
+          let employeeAllowanceResult = [];
+          let searchGroupId = groupId === "general" ? "" : groupId;
+          for (let empData of percentageCSVData) {
+            let singlePercentage = { ...percentage };
+            if (!empData.UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: empData.UserName,
+              }
+            );
+            if (!currentUser || currentUser.groupId !== searchGroupId) {
+              continue;
+            }
+            singlePercentage["basic"] = parseFloat(empData.Basic);
+            singlePercentage["hra"] = parseFloat(empData.HRA);
+            singlePercentage["buffer"] = parseFloat(empData.Buffer);
+            singlePercentage["specialAllowances"] = 0;
+            let singleEmployeeData = {
+              username: currentUser.username,
+              id: currentUser._id,
+              organisationId: currentUser.organisationId,
+              employeeId: empData.EmployeeId,
+              displayName: empData.EmployeeName,
+            };
+            allowancesKey.forEach((val) => {
+              if (
+                Object.keys(empData).find(
+                  (item) => item === camelToSpaceSeparated(val)
+                )
+              ) {
+                singlePercentage.allowances[val] = {
+                  ...singlePercentage.allowances[val],
+                  value: parseFloat(empData[camelToSpaceSeparated(val)]),
+                };
+              }
+            });
+            cAllowancesKey.forEach((val) => {
+              if (
+                Object.keys(empData).find(
+                  (item) => item === camelToSpaceSeparated(val)
+                )
+              ) {
+                singlePercentage.customAllowances[val] = {
+                  ...singlePercentage.customAllowances[val],
+                  value: parseFloat(empData[camelToSpaceSeparated(val)]),
+                };
+              }
+            });
+            employeeAllowanceResult.push({
+              ...singleEmployeeData,
+              percentage: singlePercentage,
+            });
+          }
+
+          return employeeAllowanceResult;
+        } catch (err) {
+          this.logger.error(err.message || errors.deleteError);
+          return [];
+        }
+      },
+    },
+    declarationParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          // const declarations = await csvParser().fromFile(files.file[0].path);
+          const declarations = getExcelData(files.file[0].path);
+          let deductions = {};
+          declarationTemplate["deductions"].forEach((item) => {
+            deductions[item.declaration] = { ...item };
+          });
+          const successList = [];
+          for (let declaration of declarations) {
+            let arr = [];
+            if (!declaration.Username) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: declaration.Username,
+              }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            let newObj = {
+              username: currentUser.username,
+              employeeId: declaration["Employee Id"],
+              displayName: declaration["Employee Name"],
+              id: currentUser._id,
+              organisationId: currentUser.organisationId,
+            };
+            for (let item in declaration) {
+              if (
+                item !== "UserName" &&
+                item !== "Employee Id" &&
+                item !== "Employee Name"
+              ) {
+                let key = spaceSeparatedToCamel(item);
+                try {
+                  deductions[key]["amount"] = parseFloat(declaration[item])
+                    ? parseFloat(declaration[item])
+                    : 0;
+                  arr.push(deductions[key]);
+                } catch (e) {
+                  // continue regardless of error
+                }
+              }
+            }
+            newObj = { ...newObj, declaration: arr };
+            successList.push(newObj);
+            declarationTemplate["deductions"].forEach((item) => {
+              deductions[item.declaration] = { ...item };
+            });
+          }
+          return successList;
+        } catch (err) {
+          this.logger.error(err.message || errors.deleteError);
+          return [];
+        }
+      },
+    },
+
+    regimeExcelParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const regimeData = getExcelData(files.file[0].path);
+          const parsedRegimeData = [];
+          for (let item of regimeData) {
+            const { EmployeeId, EmployeeName, Regime_Selection } = item;
+            if (!item.UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const regimeObj = {
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              regimeOptedStatus:
+                Regime_Selection.toLowerCase() === "new_regime" ? 1 : 0,
+              id: currentUser._id,
+            };
+            parsedRegimeData.push(regimeObj);
+          }
+          return parsedRegimeData;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          console.log(err);
+          return [];
+        }
+      },
+    },
+    leaveCreditExcelParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const sheets = getExcelDataOfAllSheets(files.file[0].path);
+          const leaveJSON = sheets[0];
+          const configSheet = sheets[1];
+          let configObject = {};
+          if (!configSheet) return [];
+          for (let configData of configSheet) {
+            configObject[configData["0"]] = configData["1"];
+          }
+          const parsedLeaveData = [];
+          for (let item of leaveJSON) {
+            const { EmployeeId, EmployeeName } = item;
+            if (!item.UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const leaveObject = {
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              id: currentUser._id,
+              organisationId: currentUser.organisationId,
+              leaveTypes: {},
+            };
+            let totalNoOfLeaves = 0;
+            for (let key in configObject) {
+              leaveObject["leaveTypes"][[cryptr.decrypt(configObject[key])]] = {
+                leaveName: camelToSpaceSeparated(key),
+                balance: parseFloat(item[key]),
+              };
+              totalNoOfLeaves += parseFloat(item[key]);
+            }
+            leaveObject["totalNoOfLeaves"] = totalNoOfLeaves;
+            parsedLeaveData.push(leaveObject);
+          }
+          return parsedLeaveData;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    generateAllEmployeeCsv: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          let csv = `Employee_ID, Employee_Name,Father_Name,Designation,SEX,Date_of_Joining,Date_of_Birth,Aadhar_No, ESIC_No, UAN_No, UAN_Password, Mobile_No, Marital_Status, Education_Qualification, Present_Address, Permanent_Address, PAN, Voter_ID, Nominee_Name, Nominee_DOB, Nominee_Relationship, Nominee_Aadhar, Nominee-Name(1),Nominee-DOB(1),Nominee-Relationship(1),Nominee-Aadhar No(1),Nominee-Name(2),Nominee-DOB(2),Nominee-Relationship(2),Nominee-Aadhar No(2),Nominee-Name(3),Nominee-DOB(3),Nominee-Relationship(3),Nominee-Aadhar No(3),Site Name,Location,Left_Date,Notes,ID_Card_Status,ID_Card_Type,Resignation_Date,Resignation_Letter,Uniform,EPF_Status\n`;
+          employeeList.map((value) => {
+            csv += `${value["currentOrganisationMeta"]["employeeId"]},${value.displayName}, ${value.familyDetails.fathersName} \n`;
+          });
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    parseAllEmployees: {
+      async handler(ctx) {
+        try {
+          const { files } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          return await csvParser().fromFile(files.file[0].path);
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    form16Generation: {
+      async handler() {
+        try {
+          return await generateForm16B();
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    downloadConfigurationFiles: {
+      async handler(ctx) {
+        try {
+          const { type } = ctx.params;
+          if (!type) {
+            return configTypes["designation"];
+          }
+          return configTypes[type];
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return "Designation Name";
+        }
+      },
+    },
+    advanceTaxParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const advanceTax = getExcelData(files.file[0].path);
+          const parsedAdvanceTax = [];
+          for (let advTax of advanceTax) {
+            const {
+              EmployeeId,
+              EmployeeName,
+              UserName,
+              Advance_Tax,
+              Is_Advance_Tax_Above_IncomeTax,
+            } = advTax;
+            if (!UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const advanceTaxObject = {
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              advanceTax: parseFloat(Advance_Tax),
+              isAdvanceTaxAboveIncomeTax:
+                Is_Advance_Tax_Above_IncomeTax.toLowerCase() === "yes"
+                  ? true
+                  : false,
+              id: currentUser._id,
+            };
+            parsedAdvanceTax.push(advanceTaxObject);
+          }
+          return parsedAdvanceTax;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    ipAddressParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const ipDetails = getExcelData(files.file[0].path);
+          const parsedIpDetails = [];
+          for (let ipDetail of ipDetails) {
+            const { EmployeeId, EmployeeName, UserName, IP_Address } = ipDetail;
+            if (!UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const advanceTaxObject = {
+              employeeId: EmployeeId,
+              displayName: EmployeeName,
+              username: currentUser.username,
+              ip: IP_Address,
+              id: currentUser._id,
+            };
+            parsedIpDetails.push(advanceTaxObject);
+          }
+          return parsedIpDetails;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    generateDateOfJoiningExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createDateOfJoiningExcel(employeeList);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    dateOfJoiningParser: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const allUsers = getExcelData(files.file[0].path);
+          const parsedUser = [];
+          for (let item of allUsers) {
+            const { Employee_Id, Employee_Name } = item;
+            let doj = item["DATE_OF_JOINING (MM-DD-YYYY)"];
+            if (!item.UserName) continue;
+            let currentUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              {
+                username: item.UserName,
+              }
+            );
+            if (!currentUser) {
+              continue;
+            }
+            const userObject = {
+              employeeId: Employee_Id,
+              displayName: Employee_Name,
+              username: currentUser.username,
+              id: currentUser._id,
+              dateOfJoining: "",
+            };
+            if (
+              doj !== null ||
+              new Date(doj).toDateString() !== "Invalid Date"
+            ) {
+              userObject.dateOfJoining = new Date(doj).toDateString();
+            }
+            parsedUser.push(userObject);
+          }
+          return parsedUser;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+    getTaxProjectionPdf: {
+      async handler(ctx) {
+        try {
+          const { id, financialYear, month } = ctx.params;
+          const taxProjectionData = await this.broker.call(
+            "tax.createTaxProjection",
+            {
+              id,
+              financialYear,
+              month: parseInt(month),
+            }
+          );
+          if (!taxProjectionData) return "No tax projection data available";
+          const preparedData = this.prepareTaxProjectionData(taxProjectionData);
+          return generatePDFTables(
+            taxProjection({
+              month,
+              financialYear,
+              ...preparedData,
+            }),
+            "A2",
+            "portrait"
+          );
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "Error while getting pdf";
+        }
+      },
+    },
+    createEmployeeIdExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createEmployeeIdBulk(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    parserEmployeeIdDetails: {
+      async handler(ctx) {
+        try {
+          const { files, fields } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          const userData = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (userData.role !== "org") return [];
+          const employeeDetails = getExcelData(files.file[0].path);
+          const dataList = [];
+          for (let item of employeeDetails) {
+            const { UserName, New_EmployeeId } = item;
+            if (!UserName) continue;
+            const existUser = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (!existUser) continue;
+            const { currentOrganisationMeta, displayName, _id, username } =
+              existUser;
+            const obj = {
+              id: _id,
+              currentEmployeeId: currentOrganisationMeta.employeeId,
+              displayName,
+              username,
+              employeeId: New_EmployeeId,
+            };
+            dataList.push(obj);
+          }
+          return dataList;
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return [];
+        }
+      },
+    },
+  },
+  methods: {
+    camelToSpaceSeparated(text) {
+      let result = text.replace(/([A-Z])/g, " $1");
+      return result.charAt(0).toUpperCase() + result.slice(1);
+    },
+    getBooleanResult(item) {
+      let result = item ? item.toLowerCase() : false;
+      return result === "yes" || result === "true" || result === "y";
+    },
+    async getGroupAllowances(groupId, organisationId) {
+      let allowances = {};
+      let customAllowances = {};
+      let percentage = {};
+      try {
+        if (groupId === "general") {
+          let organisation = await this.broker.call(
+            "users.getOrganisationFromOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          if (!organisation) {
+            return false;
+          }
+          let { organisationSettings } = organisation;
+          allowances = organisationSettings.allowances;
+          customAllowances = organisationSettings.customAllowances;
+          percentage = organisationSettings.percentageStructure;
+        } else {
+          let group = await this.broker.call("groups.getGroupByGroupId", {
+            groupId,
+            organisationId,
+          });
+          if (!group) {
+            return false;
+          }
+          allowances = group.allowances;
+          customAllowances = group.customAllowances;
+          percentage = group.percentage;
+        }
+      } catch (e) {
+        console.log(e);
+      }
+
+      return { allowances, customAllowances, percentage };
+    },
+    prepareTaxProjectionData(taxProjectionData) {
+      const {
+        rebalanceStructure,
+        payslipCalculations,
+        deductionCalculations,
+        perqsCalculation,
+        earningCalculation,
+        deductionCalculation,
+        proffTax,
+        hraObject,
+        exemptions,
+        totalExemption: te,
+        category,
+        subCategory,
+        totalDeductionValue,
+        taxInfo: ti,
+        A,
+        B,
+        C,
+        D,
+        E,
+        F,
+        G,
+        H,
+        I,
+        J,
+        K,
+        L,
+        M,
+        N,
+        O,
+        P,
+        Q,
+        R,
+        S,
+      } = taxProjectionData;
+      const headValues = {
+        A,
+        B,
+        C,
+        D,
+        E,
+        F,
+        G,
+        H,
+        I,
+        J,
+        K,
+        L,
+        M,
+        N,
+        O,
+        P,
+        Q,
+        R,
+        S,
+      };
+      const totalDeclarationValue = { ...totalDeductionValue };
+      const declarationCategory = { ...category };
+      const declarationSubCategory = { ...subCategory };
+      const totalProffTax = proffTax;
+      const previousIncome = { ...rebalanceStructure };
+      const Hra = { ...hraObject };
+      const salaryComponent = { ...payslipCalculations };
+      const deductions = { ...deductionCalculations };
+      const perqs = { ...perqsCalculation };
+      const totalEarning = { ...earningCalculation };
+      const totalDeductions = { ...deductionCalculation };
+      const exemptionValues = { ...exemptions };
+      const totalExemption = te;
+      const taxInfo = { ...ti };
+      return {
+        headValues,
+        totalDeclarationValue,
+        declarationCategory,
+        declarationSubCategory,
+        totalProffTax,
+        previousIncome,
+        Hra,
+        salaryComponent,
+        deductions,
+        perqs,
+        totalEarning,
+        totalDeductions,
+        exemptionValues,
+        totalExemption,
+        taxInfo,
+      };
+    },
+  },
+};
