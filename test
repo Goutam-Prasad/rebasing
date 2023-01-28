@@ -1,0 +1,84 @@
+    "GET organisation/monthclose/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateMonthCloseExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": "attachment; filename=MonthClose.xlsx",
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/bonus/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateBonusExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Bonus.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/accident/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateAccidentExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=accident.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/fine/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateFineExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Fine.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET  monthclose/generate/excel/lop/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateLOPExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=LOP.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
+          "GET monthclose/generate/excel/other/:organisationId"(req, res) {
+            const { organisationId } = req.$params;
+            this.broker
+              .call("mclose.generateOtherCreditDebitExcel", {
+                organisationId,
+              })
+              .then((instruction) => {
+                res.writeHead(200, {
+                  "Content-Type": "application/force-download",
+                  "Content-disposition": `attachment; filename=Custom Month Close.xlsx`,
+                });
+                res.end(instruction);
+              });
+          },
