@@ -1,0 +1,2458 @@
+"use strict";
+
+const csvToJson = require("csvtojson");
+const ObjectID = require("mongodb").ObjectID;
+
+// Local Imports
+const DbService = require("../mixins/db.mixins");
+const responseMixin = require("../mixins/response.mixins");
+const {
+  payslipsDefaultVars,
+  monthList,
+  monthDays,
+  MIN_WAITING_TIME,
+} = require("../utils/config");
+const csvFormats = require("../utils/constant");
+const { customValidators } = require("../utils/customValidationObject.utils");
+const dateCheckUtil = require("../utils/dateCheckUtil");
+const {
+  getYearFromFY,
+  dateDestruct,
+  isLeapYear,
+  timeDiffCalc,
+  getFYFromMonthAndYear,
+} = require("../utils/dateCheckUtil");
+const errors = require("../utils/errorConfig");
+const { getTotalWeeklyOffs } = require("../utils/utility");
+const { delay } = require("../utils/utility");
+const {
+  createMonthCloseExcel,
+  createBonusExcel,
+  createAccidentExcel,
+  createLOPExcel,
+  createOthersCreditDebitExcel,
+  createFineExcel,
+  createArrearsAndBonusReportExcel,
+} = require("../utils/createExcel");
+const {
+  getExcelData,
+  getExcelDataOfAllSheets,
+} = require("../utils/excelToJson");
+
+const extraParameter = {
+  lop: "0\n",
+  bonus: "0,0\n",
+  damage: `,0,${new Date().toLocaleDateString()},yes,0,0,0\n`,
+  fine: `,0,${new Date().toLocaleDateString()},yes,Name,0,0,${new Date().toLocaleDateString()}\n`,
+  overtime: `${new Date().toLocaleDateString()},0,0,0,0,${new Date().toLocaleDateString()}\n`,
+  overday: "0\n",
+  accident: "\n",
+  maternity: "\n",
+  other: "0,Custom Credit Name,0,Custom Debit Name\n",
+};
+
+module.exports = {
+  name: "mclose",
+  // Mixin DB service into (current) 'users' service
+  mixins: [DbService("mclose"), responseMixin],
+  actions: {
+    getOrganisationMonthClose: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return [];
+          let { organisationId } = ctx.params;
+          const { financialYear } = dateCheckUtil.checkFinancialYear();
+          return await this.adapter.find({
+            query: {
+              organisationId,
+              financialYear,
+              hidden: { $in: [false, null] },
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getOrganisationMonthCloseReport: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["organisationId", "financialYear", "month"],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          let { organisationId, financialYear, month } = ctx.params;
+          let monthClose = await this.adapter.find({
+            query: {
+              organisationId,
+              financialYear,
+              month: parseInt(month),
+              hidden: { $in: [false, null] },
+            },
+          });
+          let monthCloseProcessedData =
+            this.employeeMonthCloseCompilation(monthClose);
+          let employeeDetails = [];
+          for (let mc of monthCloseProcessedData) {
+            let employeeId = mc.employeeId;
+            let displayName = mc.name;
+            let addedOn = new Date(mc.createdAt).toDateString();
+            let applicableOn = monthList[mc.month];
+            let creditAmount = mc.credit;
+            let debitAmount = mc.debit;
+            employeeDetails.push({
+              employeeId: employeeId,
+              displayName: displayName,
+              addedOn: addedOn,
+              applicableOn: applicableOn,
+              creditAmount: creditAmount,
+              debitAmount: debitAmount,
+            });
+          }
+          return createArrearsAndBonusReportExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getEmployeeMonthCloseDetails: {
+      async handler(ctx) {
+        try {
+          const { id, month, financialYear } = ctx.params;
+          return this.adapter.find({
+            query: {
+              financialYear,
+              month: parseInt(month),
+              "user._id": new ObjectID(id),
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getEmployeeMClose: {
+      async handler(ctx) {
+        try {
+          if (
+            errors.validationCheck(["id", "month", "financialYear"], ctx.params)
+          ) {
+            const { id, month, financialYear } = ctx.params;
+            const lopMcloseData = await this.adapter.find({
+              query: {
+                financialYear,
+                month: parseInt(month),
+                "user._id": new ObjectID(id),
+                details: "LOP_Debit",
+              },
+            });
+            const totalLopExist =
+              lopMcloseData.length > 0
+                ? lopMcloseData.reduce((prev, curr) => prev + curr.lopDays, 0)
+                : 0;
+            // check for resignation
+            // if last day of working is in this month, then create new month closes.
+            const settlement = await this.broker.call(
+              "settlement.getFinalSettlement",
+              { id }
+            );
+            const year = getYearFromFY(financialYear, month);
+            if (settlement) {
+              const { lastDayOfWorking } = settlement;
+              const { month: lastMonth, year: lastYear } =
+                dateDestruct(lastDayOfWorking);
+              if (
+                (lastMonth - 1 <= month && lastYear == year) ||
+                (lastMonth - 1 > month && lastYear < year)
+              ) {
+                const user = await this.broker.call("users.fetchUserById", {
+                  id,
+                });
+                if (!user) return [];
+                const { organisationId, groupId } = user;
+                const lopDetails = await this.getTotalFnFDays({
+                  lastDayOfWorking,
+                  month,
+                  year,
+                  organisationId,
+                  groupId,
+                });
+                if (!lopDetails) return [];
+                const { totalLOPDays } = lopDetails;
+                if (totalLopExist < totalLOPDays) {
+                  await this.actions.singleLOPOverdayDetails({
+                    month,
+                    financialYear,
+                    type: "lop",
+                    id,
+                    days: totalLOPDays,
+                    organisationId,
+                    hidden: true,
+                  });
+                }
+              }
+            }
+            const monthCloseData = await this.adapter.find({
+              query: {
+                financialYear,
+                month: parseInt(month),
+                "user._id": new ObjectID(id),
+              },
+            });
+            if (monthCloseData) return monthCloseData;
+            return [];
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    getMcloseLopDays: {
+      async handler(ctx) {
+        try {
+          const { id, month, financialYear } = ctx.params;
+          return await this.adapter.find({
+            query: {
+              financialYear,
+              month: parseInt(month),
+              "user._id": new ObjectID(id),
+              details: "LOP_Debit",
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getMcloseLopDaysByOrganisation: {
+      async handler(ctx) {
+        try {
+          const { organisationId, month, financialYear } = ctx.params;
+          return this.adapter.find({
+            query: {
+              financialYear,
+              month: parseInt(month),
+              "user.organisationId": organisationId,
+              details: "LOP_Debit",
+            },
+          });
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getMcloseLopObjectByOrganisation: {
+      async handler(ctx) {
+        try {
+          const { organisationId, month, financialYear } = ctx.params;
+          const monthCloseData = await this.adapter.find({
+            query: {
+              financialYear,
+              month: parseInt(month),
+              "user.organisationId": organisationId,
+              details: "LOP_Debit",
+            },
+          });
+          const lopData = {};
+          for (let mclose of monthCloseData) {
+            const { _id: id } = mclose.user;
+            if (lopData[id]) {
+              lopData[id] = {
+                lopDays: lopData[id].lopDays + mclose.lopDays,
+                lopAmount: lopData[id].lopAmount + mclose.amount,
+              };
+            } else {
+              lopData[id] = {
+                lopDays: mclose.lopDays || 0,
+                lopAmount: mclose.amount || 0,
+              };
+            }
+          }
+          return lopData;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getEmployeeMonthClose: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["id"], ctx.params)) {
+            const { id } = ctx.params;
+            const { month, financialYear } = dateCheckUtil.checkFinancialYear();
+            const monthCloseData = await this.adapter.find({
+              query: {
+                financialYear,
+                month,
+                "user._id": new ObjectID(id),
+              },
+            });
+            if (monthCloseData) return monthCloseData;
+            return [];
+          } else {
+            return this.error(errors.wrongFieldError);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getEmployeeLOPDetails: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["id", "month", "financialYear"],
+              ctx.params
+            )
+          ) {
+            return this.error(errors.wrongFieldError);
+          }
+          const { id, month, financialYear } = ctx.params;
+          let lopData = await this.adapter.find({
+            query: {
+              "user._id": new ObjectID(id),
+              month: parseInt(month),
+              financialYear,
+              details: "LOP_Debit",
+            },
+          });
+          let responseData = {
+            lopDays: 0,
+            lopAmount: 0,
+          };
+          lopData.forEach((val) => {
+            responseData.lopDays += val.lopDays;
+            responseData.lopAmount += val.amount;
+          });
+          return this.success(responseData);
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    getEmployeeMonthCloseReportData: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              ["organisationId", "financialYear", "month"],
+              ctx.params
+            )
+          )
+            return null;
+          let { organisationId, financialYear, month } = ctx.params;
+          let monthClose = await this.adapter.find({
+            query: {
+              organisationId,
+              financialYear,
+              month: parseInt(month),
+            },
+          });
+          return this.employeeMonthCloseCompilation(monthClose);
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return null;
+        }
+      },
+    },
+    createArrears: {
+      async handler(ctx) {
+        let {
+          ID,
+          isOneTime,
+          totalAmount,
+          subCategoryCode,
+          subCategory,
+          allowanceKey,
+          organisationId,
+          month,
+          startMonth,
+          endMonth,
+          startYear,
+          endYear,
+          fromMonth,
+          toMonth,
+          fromYear,
+          toYear,
+          year,
+        } = ctx.params;
+        const organisation = await this.broker.call(
+          "users.getOrganisationByOrganisationId",
+          { organisationId }
+        );
+        if (!organisation)
+          return this.error("Error while fetching organisation");
+        const user = await this.broker.call("users.fetchUserById", { id: ID });
+        if (!user) return this.error("Error: No User Found!");
+        const startDate = new Date(new Date().setMonth(startMonth)).setFullYear(
+          startYear
+        );
+        const endDate = new Date(new Date().setMonth(endMonth)).setFullYear(
+          endYear
+        );
+        const { monthDiff } = timeDiffCalc(startDate, endDate);
+        const perMonthAmount = Math.round(totalAmount / (monthDiff + 1));
+        let totalMonthlyAmount = 0;
+        while (startMonth <= endMonth || startYear < endYear) {
+          if (startYear != endYear && startMonth > 11) {
+            startMonth = 0;
+            startYear++;
+          }
+          const financialYear = getFYFromMonthAndYear(startYear, startYear);
+          const LOP = await this.adapter.findOne({
+            "user._id": new ObjectID(ID),
+            month: startMonth,
+            financialYear,
+            details: "LOP_Debit",
+          });
+          let currentAmount = perMonthAmount;
+          if (LOP && LOP.lopDays) {
+            currentAmount = Math.round(
+              perMonthAmount * (1 - LOP.lopDays / monthDays[startMonth])
+            );
+          }
+          totalMonthlyAmount += currentAmount;
+          startMonth++;
+        }
+        // Formula goes here
+
+        totalAmount = totalMonthlyAmount;
+        if (totalAmount <= 0)
+          return this.error("Error: Too Much LOP in this duration!");
+        if (!isOneTime) {
+          const monthCloses = [];
+          const pastDate = new Date(new Date().setMonth(fromMonth)).setFullYear(
+            fromYear
+          );
+          const futureDate = new Date(new Date().setMonth(toMonth)).setFullYear(
+            toYear
+          );
+          const { monthDiff } = timeDiffCalc(pastDate, futureDate);
+          const monthlyAmount = Math.round(totalAmount / (monthDiff + 1));
+          while (fromMonth <= toMonth || fromYear < toYear) {
+            if (fromYear != toYear && fromMonth > 11) {
+              fromMonth = 0;
+              fromYear++;
+            }
+            const financialYear = getFYFromMonthAndYear(fromMonth, fromYear);
+            // create month close sections
+            monthCloses.push({
+              type: "credit",
+              organisationId,
+              details: "Arrears",
+              subDetails: subCategory,
+              subDetailsCode: subCategoryCode,
+              amount: monthlyAmount,
+              month: fromMonth,
+              allowanceKey: subCategoryCode === 1 ? allowanceKey : null,
+              id: ID,
+              financialYear,
+              user,
+            });
+            fromMonth++;
+          }
+          await this.adapter.collection.insertMany(monthCloses);
+        } else {
+          const financialYear = getFYFromMonthAndYear(month, year);
+          await this.adapter.insert({
+            type: "credit",
+            organisationId,
+            details: "Arrears",
+            subDetails: subCategory,
+            subDetailsCode: subCategoryCode,
+            amount: totalAmount,
+            month,
+            allowanceKey: subCategoryCode === 1 ? allowanceKey : null,
+            id: ID,
+            financialYear,
+            user,
+          });
+        }
+        return this.success("Created Month close Successfully!");
+      },
+    },
+    filterMonthClose: {
+      async handler(ctx) {
+        try {
+          if (errors.validationCheck(["organisationId"], ctx.params)) {
+            let { organisationId, financialYear, month } = ctx.params;
+            return await this.adapter.find({
+              query: {
+                organisationId,
+                financialYear,
+                month: parseInt(month),
+              },
+            });
+          } else {
+            return [];
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return [];
+        }
+      },
+    },
+    generateCSV: {
+      async handler(ctx) {
+        try {
+          let csv =
+            "Employee_ID,UserName,Name,Salary_Month,Incentive,Variable_Salary,Other_Allowance,Awards,Rewards,Leave_Encashment,Fine_Amount,Loans,Attendance_Bonus\n";
+          if (!errors.validationCheck(["organisationId", "type"], ctx.params))
+            return csv;
+
+          const { organisationId, type } = ctx.params;
+          csv = csvFormats[type];
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          employeeList.map((value) => {
+            csv += `${value.currentOrganisationMeta.employeeId},${value.username},${value.displayName},${extraParameter[type]}`;
+          });
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return "";
+        }
+      },
+    },
+    generateMonthCloseCSV: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return "";
+          const { organisationId } = ctx.params;
+          let csv =
+            "Employee_ID,UserName,Name,Incentive,Variable_Salary,Other_Allowance,Awards,Rewards,Leave_Encashment\n";
+          let employeeList = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          employeeList.map((value) => {
+            csv += `${value.currentOrganisationMeta.employeeId},${value.username},${value.displayName},0,0,0,0,0,0\n`;
+          });
+          return csv;
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return "";
+        }
+      },
+    },
+    generateMonthCloseExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createMonthCloseExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateBonusExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createBonusExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateAccidentExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createAccidentExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateLOPExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createLOPExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateOtherCreditDebitExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createOthersCreditDebitExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    generateFineExcel: {
+      async handler(ctx) {
+        try {
+          const { organisationId } = ctx.params;
+          const users = await this.broker.call("users.fetchEmployeeList", {
+            organisationId,
+          });
+          return createFineExcel(users);
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return "";
+        }
+      },
+    },
+    validatedMcloseData: {
+      async handler(ctx) {
+        try {
+          const { files, fields, month, financialYear } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const userDetails = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+          if (!userDetails) {
+            return this.error("Sorry Organization doesn't exist");
+          }
+
+          const { organisationId } = userDetails;
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+
+          // const data = await csvToJson().fromFile(files.file[0].path);
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            allArray = [],
+            errorList = [];
+
+          for (const element of data) {
+            const currentEntry = element;
+            const { UserName } = currentEntry;
+            const errorMessages = [];
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorMessages.push("User not in the organisation");
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages,
+              });
+              continue;
+            }
+            if (parseInt(currentEntry.Incentive) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Incentive",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Incentive is not valid");
+            }
+            if (parseInt(currentEntry.Variable_Salary) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Variable_Salary",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Variable Salary is not valid");
+            }
+            if (parseInt(currentEntry.Other_Allowance) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Other_Allowance",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Other Allowance is not valid");
+            }
+            if (parseInt(currentEntry.Awards) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Awards",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Awards is not valid");
+            }
+            if (parseInt(currentEntry.Rewards) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Rewards",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Rewards is not valid");
+            }
+            if (parseInt(currentEntry.Leave_Encashment) != 0) {
+              newDataArr.push(
+                this.makeMcloseData(
+                  "Leave_Encashment",
+                  currentEntry,
+                  payslipsDefaultVars,
+                  financialYear,
+                  applicableMonth,
+                  organisationId,
+                  userOrg
+                )
+              );
+            } else {
+              errorMessages.push("Leave Encashment is not valid");
+            }
+            if (newDataArr.length != 0) {
+              allArray.push({ ...newDataArr });
+              newDataArr.length = 0;
+            }
+            errorList.push({
+              username: UserName,
+              errorType: 1,
+              errorMessages,
+            });
+          }
+          return { mcloseData: allArray, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateCustomMonthClose: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          // const data = await csvToJson().fromFile(files.file[0].path);
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            try {
+              const currentEntry = element;
+              const { UserName } = currentEntry;
+              let userOrg = await this.broker.call(
+                "users.fetchUserByUserName",
+                { username: UserName }
+              );
+              if (
+                userOrg === null ||
+                userOrg.organisationId !== organisationId
+              ) {
+                errorList.push({
+                  username: UserName,
+                  errorType: 2,
+                  errorMessages: "User not in the organisation",
+                });
+                continue;
+              }
+              if (parseInt(currentEntry.Others_Credits) > 0) {
+                newDataArr.push({
+                  username: userOrg.username,
+                  id: userOrg._id,
+                  financialYear,
+                  month: applicableMonth,
+                  organisationId,
+                  createdAt: Date.now(),
+                  details: "Others_Credits",
+                  subDetails: currentEntry.Others_Credit_Details,
+                  amount: currentEntry.Others_Credits,
+                  type: "credit",
+                  taxable: true,
+                  otherText: currentEntry.Others_Credit_Details,
+                  lopDays: 0,
+                  overday: 0,
+                  user: userOrg,
+                });
+              }
+              if (parseInt(currentEntry.Others_Debits) > 0) {
+                newDataArr.push({
+                  username: userOrg.username,
+                  id: userOrg._id,
+                  financialYear,
+                  month: applicableMonth,
+                  organisationId,
+                  createdAt: Date.now(),
+                  details: "Others_Debits",
+                  subDetails: currentEntry.Others_Debit_Details,
+                  amount: currentEntry.Others_Debits,
+                  type: "debit",
+                  taxable: true,
+                  otherText: currentEntry.Others_Debit_Details,
+                  lopDays: 0,
+                  overday: 0,
+                  user: userOrg,
+                });
+              }
+            } catch (e) {
+              this.logger.error(e.message || errors.updateError);
+              continue;
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.updateError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateMaternityDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          await delay(MIN_WAITING_TIME);
+          let applicableMonth = parseInt(month);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          const data = await csvToJson().fromFile(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let {
+              DateOfPregnancyNotice,
+              Date_Of_Delivery_Notice,
+              Date_Of_Proof_Of_Birth,
+              Date_Of_Proof_Of_Death_IfAny,
+              Benefits_Paid_In_Advance,
+              Bonus,
+              Leave_Wages_Section9,
+              Leave_Wages_Section10,
+              Benefits_Paid_In_Advance_Date,
+              Other_Benefits_Paid,
+              Other_Benefits_Paid_Date,
+              Bonus_Date,
+              Leave_Wages_Section9_Date,
+              Leave_Wages_Section10_Date,
+            } = currentEntry;
+            const { UserName } = currentEntry;
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            newDataArr.push({
+              username: userOrg.username,
+              id: userOrg._id,
+              financialYear,
+              month: applicableMonth,
+              organisationId,
+              createdAt: Date.now(),
+              details: "Maternity",
+              subDetails: "Maternity",
+              meta: {
+                dateOfPregnancyNotice: DateOfPregnancyNotice,
+                dateOfDeliveryNotice: Date_Of_Delivery_Notice,
+                dateOfProofOfBirth: Date_Of_Proof_Of_Birth,
+                dateOfProofOfDeathIfAny: Date_Of_Proof_Of_Death_IfAny,
+                benefitsPaidInAdvance: Benefits_Paid_In_Advance,
+                leaveWagesSection9: Leave_Wages_Section9,
+                leaveWagesSection10: Leave_Wages_Section10,
+                benefitsPaidInAdvanceDate: Benefits_Paid_In_Advance_Date,
+                otherBenefitsPaid: Other_Benefits_Paid,
+                otherBenefitsPaidDate: Other_Benefits_Paid_Date,
+                bonusDate: Bonus_Date,
+                leaveWagesSection9Date: Leave_Wages_Section9_Date,
+                leaveWagesSection10Date: Leave_Wages_Section10_Date,
+              },
+              amount: parseFloat(Bonus),
+              type: "credit",
+              taxable: true,
+              user: userOrg,
+            });
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    singleLOPOverdayDetails: {
+      async handler(ctx) {
+        try {
+          if (
+            !errors.validationCheck(
+              [
+                "month",
+                "financialYear",
+                "type",
+                "id",
+                "days",
+                "organisationId",
+              ],
+              ctx.params
+            )
+          )
+            return this.error(errors.wrongFieldError);
+          const {
+            month,
+            financialYear,
+            type,
+            id,
+            organisationId,
+            days,
+            hidden,
+          } = ctx.params;
+          const applicableMonth = parseInt(month);
+          const user = await this.broker.call("users.fetchUserById", {
+            id,
+          });
+          if (!user) return this.error(errors.NO_USER_NOT_FOUND);
+          if (user.organisationId !== organisationId) {
+            return this.error(
+              "Organisation Id and User Id is not matching same credential"
+            );
+          }
+
+          let {
+            groupId,
+            currentOrganisationMeta: { dateOfJoining },
+          } = user;
+          if (!groupId) groupId = "";
+
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (!payslipFreeze) {
+            await this.broker.call(
+              "payslips.deletePayslipByMonthAndFinancialYear",
+              {
+                id: user._id,
+                month,
+                financialYear,
+              }
+            );
+          } else {
+            if (payslipFreeze["payrollFreeze"]) {
+              return this.error("Payroll Freezed, can not add Month close");
+            }
+          }
+          let ctcResponse = await this.broker.call("ctc.getCTC", {
+            id,
+            financialYear,
+          });
+          if (!ctcResponse.success || !ctcResponse.data) {
+            return this.error("No CTC Found!");
+          }
+          const { costToCompany } = ctcResponse.data;
+          const year = getYearFromFY(financialYear, applicableMonth);
+          let amount = 0;
+          if (type !== "overtime") {
+            amount = await this.getLOPAmountFromDays({
+              dateOfJoining,
+              groupId,
+              days,
+              month: applicableMonth,
+              costToCompany,
+              organisationId,
+              year,
+              financialYear,
+              id,
+              user,
+            });
+          } else {
+            const data = await this.getOverDayAmount({
+              id,
+              month,
+              financialYear,
+              days,
+              component: ctx.params.component,
+              factor: ctx.params.factor,
+            });
+            if (data && data.success) {
+              amount = data.data.overDayAmount;
+            }
+          }
+          const monthClose = {
+            financialYear,
+            id: user._id,
+            month: applicableMonth,
+            organisationId,
+            createdAt: Date.now(),
+            details: type === "lop" ? "LOP_Debit" : "Overtime",
+            subDetails: type === "lop" ? "LOP_Debit" : "Overtime",
+            amount,
+            type: type === "lop" ? "debit" : "credit",
+            taxable: true,
+            lopDays: type === "lop" ? parseInt(days) : 0,
+            overdays: type === "lop" ? 0 : parseInt(days),
+            user,
+            hidden: hidden ?? false,
+          };
+          await this.adapter.insert({
+            ...monthClose,
+            financialYear,
+            month,
+            createdAt: Date.now(),
+          });
+          return this.success("Month Close successfully added");
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    validateLOPOverdayDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "fields"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, fields, month, financialYear, type } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const userDetails = await this.broker.call("users.getUserFromToken", {
+            token: fields,
+          });
+
+          if (!userDetails) {
+            return this.error("Sorry Organization doesn't exist");
+          }
+          const { organisationId } = userDetails;
+          // `false` means total working days;
+          // `true` means days in month
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let { Days, UserName } = currentEntry;
+            if (parseFloat(Days) <= 0 || isNaN(parseFloat(Days))) {
+              continue;
+            }
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+            let {
+              groupId,
+              currentOrganisationMeta: { dateOfJoining },
+            } = userOrg;
+            if (!groupId) groupId = "";
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            // Lop debit config
+            let ctcResponse = await this.broker.call("ctc.getCTC", {
+              id: userOrg._id,
+              financialYear,
+            });
+            if (!ctcResponse.success || !ctcResponse.data) {
+              errorList.push({
+                username: UserName,
+                errorType: 1,
+                errorMessages: "CTC Not found!",
+              });
+              continue;
+            }
+            const { costToCompany } = ctcResponse.data;
+            const year = getYearFromFY(financialYear, applicableMonth);
+            const amount = await this.getLOPAmountFromDays({
+              dateOfJoining,
+              groupId,
+              days: Days,
+              month: applicableMonth,
+              costToCompany,
+              organisationId,
+              year,
+              financialYear,
+              id: userOrg._id,
+              user: userOrg,
+            });
+            newDataArr.push({
+              username: userOrg.username,
+              id: userOrg._id,
+              financialYear,
+              month: applicableMonth,
+              organisationId,
+              createdAt: Date.now(),
+              details: type === "lop" ? "LOP_Debit" : "Overtime",
+              subDetails: type === "lop" ? "LOP_Debit" : "Overtime",
+              amount,
+              type: type === "lop" ? "debit" : "credit",
+              taxable: true,
+              lopDays: type === "lop" ? parseInt(Days) : 0,
+              overdays: type === "lop" ? 0 : parseInt(Days),
+            });
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateBonusDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          // const data = await csvToJson().fromFile(files.file[0].path);
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let { UserName } = currentEntry;
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            if (parseFloat(currentEntry["Puja_Bonus"]) > 0) {
+              newDataArr.push({
+                username: UserName,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "Bonuses",
+                subDetails: "Puja_Bonus",
+                meta: {},
+                amount: parseFloat(currentEntry["Puja_Bonus"]),
+                type: "credit",
+                taxable: true,
+              });
+            }
+            if (parseFloat(currentEntry["Interim_Bonus"]) > 0) {
+              newDataArr.push({
+                username: UserName,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "Bonuses",
+                subDetails: "Interim_Bonus",
+                meta: {},
+                amount: parseFloat(currentEntry["Interim_Bonus"]),
+                type: "credit",
+                taxable: true,
+              });
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateDamageDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          const data = await csvToJson().fromFile(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let {
+              UserName,
+              Particulars_Of_Damage_Loss,
+              Damage_Amount,
+              Date_Of_Damage_Loss,
+              Has_Employee_Verified_Proofs,
+              No_Of_Installment,
+              First_InstallMent,
+              Last_Installment,
+            } = currentEntry;
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            if (parseFloat(Damage_Amount) > 0) {
+              newDataArr.push({
+                username: userOrg.username,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "DamageOrLoss",
+                subDetails: "DamageOrLoss",
+                meta: {
+                  particularsOfDamageLoss: Particulars_Of_Damage_Loss,
+                  dateOfDamage: Date_Of_Damage_Loss,
+                  hasEmployeeVerifiedProofs:
+                    Has_Employee_Verified_Proofs.toLowerCase() === "yes"
+                      ? true
+                      : false,
+                  noOfInstallment: No_Of_Installment,
+                  firstInstallment: First_InstallMent,
+                  lastInstallment: Last_Installment,
+                },
+                amount: parseFloat(Damage_Amount),
+                type: "debit",
+                taxable: true,
+              });
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateFineDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          // const data = await csvToJson().fromFile(files.file[0].path);
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let {
+              UserName,
+              Act_For_Which_Fine_Imposed,
+              Fine_Amount,
+              Date_Of_Offense,
+              Has_Employee_Verified_Proofs,
+              Name_Of_Person_Presence_While_Explaining,
+              Wages_Period,
+              Wages_Payable,
+              Fine_ReleaseDate,
+            } = currentEntry;
+            let userOrg = await this.broker.call("users.fetchUserByUserName", {
+              username: UserName,
+            });
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            if (parseFloat(Fine_Amount) > 0) {
+              newDataArr.push({
+                username: userOrg.username,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "Fine",
+                subDetails: "Fine",
+                meta: {
+                  actForWhichFineImposed: Act_For_Which_Fine_Imposed,
+                  hasEmployeeVerifiedProofs:
+                    Has_Employee_Verified_Proofs.toLowerCase() === "yes"
+                      ? true
+                      : false,
+                  dateOfOffense: Date_Of_Offense,
+                  wagesPeriod: Wages_Period,
+                  wagesPayable: Wages_Payable,
+                  fineReleaseDate: Fine_ReleaseDate,
+                  nameOfPersonPresenceWhileExplaining:
+                    Name_Of_Person_Presence_While_Explaining,
+                },
+                amount: parseFloat(Fine_Amount),
+                type: "debit",
+                taxable: true,
+              });
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateOvertimeDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          const data = await csvToJson().fromFile(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let {
+              UserName,
+              Date_On_Overtime_Worked,
+              Overtime_Earnings,
+              Normal_Hours,
+              Normal_Earning,
+              Total_Overtime_Worked,
+              Normal_Rate_Wages,
+              Overtime_Rate_Of_Wages,
+              Date_On_Overtime_Paid,
+            } = currentEntry;
+            const userOrg = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            if (parseFloat(Overtime_Earnings) > 0) {
+              newDataArr.push({
+                username: userOrg.username,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "Overtime",
+                subDetails: "Overtime",
+                meta: {
+                  dateOnOvertimeWorked: Date_On_Overtime_Worked,
+                  totalOvertimeWorked: Total_Overtime_Worked,
+                  normalRateWages: Normal_Rate_Wages,
+                  overtimeRateOfWages: Overtime_Rate_Of_Wages,
+                  dateOnOvertimePaid: Date_On_Overtime_Paid,
+                  normalHours: Normal_Hours,
+                  normalEarning: Normal_Earning,
+                },
+                amount: parseFloat(Overtime_Earnings),
+                type: "credit",
+                taxable: true,
+              });
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    validateAccidentDetails: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["files", "organisationId"], ctx.params))
+            return { mcloseData: [], errorList: [] };
+          const { files, month, financialYear, organisationId } = ctx.params;
+          let applicableMonth = parseInt(month);
+          await delay(MIN_WAITING_TIME);
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (payslipFreeze && payslipFreeze.payslipFreeze) {
+            return this.error(
+              "Sorry cannot add month close for the selected month"
+            );
+          }
+          // const data = await csvToJson().fromFile(files.file[0].path);
+          const data = getExcelData(files.file[0].path);
+          let newDataArr = [],
+            errorList = [];
+          for (const element of data) {
+            const currentEntry = element;
+            let {
+              UserName,
+              Cause_Of_Injury,
+              Insurance_No,
+              Nature_Of_Injury,
+              Recovery_Amount,
+              Date_Of_Accident,
+              Time_Of_Accident,
+              Place_Of_Accident,
+              Description,
+              Witness_Name,
+            } = currentEntry;
+            const userOrg = await this.broker.call(
+              "users.fetchUserByUserName",
+              { username: UserName }
+            );
+
+            if (userOrg == null || userOrg.organisationId != organisationId) {
+              errorList.push({
+                username: UserName,
+                errorType: 2,
+                errorMessages: "User not in the organisation",
+              });
+              continue;
+            }
+            if (parseFloat(Recovery_Amount) > 0) {
+              newDataArr.push({
+                username: userOrg.username,
+                id: userOrg._id,
+                user: userOrg,
+                financialYear,
+                month: applicableMonth,
+                organisationId,
+                createdAt: Date.now(),
+                details: "Accident",
+                subDetails: "Accident",
+                meta: {
+                  causeOfInjury: Cause_Of_Injury,
+                  insuranceNo: Insurance_No,
+                  natureOfInjury: Nature_Of_Injury,
+                  dateOfAccident: Date_Of_Accident,
+                  timeOfAccident: Time_Of_Accident,
+                  placeOfAccident: Place_Of_Accident,
+                  description: Description,
+                  witnessName: Witness_Name,
+                },
+                amount: parseFloat(Recovery_Amount),
+                type: "credit",
+                taxable: true,
+              });
+            }
+          }
+          return { mcloseData: newDataArr, errorList };
+        } catch (err) {
+          this.logger.error(err.message || errors.fetchError);
+          return { mcloseData: [], errorList: [] };
+        }
+      },
+    },
+    deleteMonthClose: {
+      async handler(ctx) {
+        try {
+          let { _id } = ctx.params;
+          const existMonthClose = await this.adapter.findById(_id);
+          if (!existMonthClose) return this.error(errors.dataNotFound);
+          const { month, financialYear, organisationId } = existMonthClose;
+          const payslip = await this.broker.call("payslips.getPayslipById", {
+            id: existMonthClose.user._id,
+            month,
+            financialYear,
+          });
+          const payslipFreeze = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonth",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+
+          if (payslipFreeze && payslipFreeze["payrollFreeze"] && payslip) {
+            return this.error("Payroll Freezed, can not delete Month close");
+          }
+          await this.broker.call(
+            "payslipfreeze.deletePayslipFreezeAndCompliance",
+            {
+              organisationId,
+              month,
+              financialYear,
+            }
+          );
+          await this.adapter.collection.deleteOne({
+            _id: new ObjectID(_id),
+          });
+          return this.success("MonthClose Deleted Successfully");
+        } catch (err) {
+          this.logger.error(err.message || errors.deleteError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    // removeAllLoans: {
+    //   async handler() {
+    //     const data = await this.adapter.find({ query: { details: "Loans" } })
+    //     for (let item of data) {
+    //       await this.adapter.collection.deleteOne({
+    //         _id: new ObjectID(item._id),
+    //       })
+    //       console.log(item._id)
+    //     }
+    //   }
+    // },
+    addMonthClose: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["monthClose"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { monthClose } = ctx.params;
+          if (this.validateMonthClose(monthClose)) {
+            const {
+              month,
+              financialYear,
+              details,
+              id,
+              organisationId,
+              amount,
+            } = monthClose;
+            const user = await this.broker.call("users.fetchUserById", {
+              id,
+            });
+            if (!user) return this.error(errors.dataNotFound);
+            if (user.organisationId !== organisationId) {
+              return this.error(
+                "Organisation Id and User Id is not matching same credential"
+              );
+            }
+            const existMonthClose = await this.adapter.findOne({
+              "user._id": new ObjectID(id),
+              organisationId: monthClose.organisationId,
+              month,
+              financialYear,
+              details,
+            });
+            if (
+              existMonthClose &&
+              !(
+                monthClose["details"].toLowerCase() === "lop_debit" ||
+                monthClose["details"].toLowerCase() === "overtime" ||
+                monthClose["details"].toLowerCase() === "fine" ||
+                monthClose["details"].toLowerCase() === "bonuses"
+              )
+            )
+              return this.error(
+                "MonthClose Already Exist with same credentials"
+              );
+            const payslipFreeze = await this.broker.call(
+              "payslipfreeze.getPayslipFreezeByMonth",
+              {
+                organisationId: user.organisationId,
+                month,
+                financialYear,
+              }
+            );
+            if (!payslipFreeze) {
+              await this.broker.call(
+                "payslips.deletePayslipByMonthAndFinancialYear",
+                {
+                  id: user._id,
+                  month,
+                  financialYear,
+                }
+              );
+            } else {
+              if (payslipFreeze["payrollFreeze"]) {
+                return this.error("Payroll Freezed, can not add Month close");
+              }
+            }
+            monthClose.user = user;
+            monthClose.amount = parseFloat(amount);
+            delete monthClose.id;
+            await this.adapter.insert({
+              ...monthClose,
+              financialYear,
+              month,
+              createdAt: Date.now(),
+            });
+            return this.success("Month Close successfully added");
+          } else {
+            return this.error(errors.validationFailed);
+          }
+        } catch (err) {
+          this.logger.error(err.message || errors.createError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    addMonthCloseV2: {
+      params: {
+        monthClose: {
+          type: "object",
+          props: {
+            type: { type: "string", empty: false },
+            organisationID: { type: "uuid" },
+            details: { type: "string", empty: false },
+            amount: { type: "number", convert: true },
+            month: {
+              type: "number",
+              convert: true,
+              min: 0,
+              max: 11,
+              integer: true,
+            },
+            financialYear: customValidators.financialYear,
+            ID: { type: "objectID", ObjectID },
+          },
+        },
+      },
+      async handler(ctx) {
+        try {
+          let { monthClose } = ctx.params;
+          const { month, financialYear, details, ID, organisationID, amount } =
+            monthClose;
+          const {
+            success,
+            data: user,
+            code,
+          } = await this.broker.call("users.fetchUserWithCustomQueryV2", {
+            query: {
+              _id: new ObjectID(ID),
+              organisationId: organisationID,
+            },
+          });
+          if (!success && code === 400) {
+            if (code === 400)
+              return this.error(
+                "No user with the provided ID found in the organisation",
+                null,
+                400,
+                errors.dataNotFound
+              );
+            else
+              throw new Error(
+                "users.fetchUserWithCustomQueryV2 failed with error"
+              );
+          }
+          const existMonthClose = await this.adapter.findOne({
+            "user._id": new ObjectID(ID),
+            organisationId: organisationID,
+            month,
+            financialYear,
+            details,
+          });
+          if (
+            existMonthClose &&
+            !(
+              monthClose["details"].toLowerCase() === "lop_debit" ||
+              monthClose["details"].toLowerCase() === "overtime" ||
+              monthClose["details"].toLowerCase() === "fine" ||
+              monthClose["details"].toLowerCase() === "bonuses"
+            )
+          )
+            return this.error(
+              "MonthClose Already Exist with same credentials",
+              null,
+              400,
+              errors.dataExistsError
+            );
+          const { data: payslipFreeze } = await this.broker.call(
+            "payslipfreeze.getPayslipFreezeByMonthV2",
+            {
+              organisationID: user.organisationId,
+              month,
+              financialYear,
+            }
+          );
+          if (!payslipFreeze) {
+            await this.broker.call(
+              "payslips.deletePayslipByMonthAndFinancialYearV2",
+              {
+                ID: user._id,
+                month,
+                financialYear,
+              }
+            );
+          } else {
+            if (payslipFreeze["payrollFreeze"]) {
+              return this.error("Payroll Freezed, can not add Month close");
+            }
+          }
+          monthClose.user = user;
+          monthClose.amount = parseFloat(amount);
+          delete monthClose.id;
+          await this.adapter.insert({
+            ...monthClose,
+            financialYear,
+            month,
+            createdAt: Date.now(),
+          });
+          return this.success("Month Close successfully added");
+        } catch (err) {
+          this.logger.error(err || errors.createError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
+    deleteLoansAndAdvanceSalariesInBulk: {
+      params: {
+        userId: { type: "objectID", ObjectID },
+        referenceID: { type: "objectID", ObjectID },
+      },
+      async handler(ctx) {
+        try {
+          const { referenceID, userId } = ctx.params;
+          await this.adapter.collection.deleteMany({
+            referenceID: new ObjectID(referenceID),
+            "user._id": new ObjectID(userId),
+          });
+          return true;
+        } catch (err) {
+          return false;
+        }
+      },
+    },
+    updateOvertimeAmountByID: {
+      params: {
+        userId: { type: "objectID", ObjectID },
+        month: { type: "number", min: 0 },
+        id: { type: "objectID", ObjectID },
+        financialYear: customValidators.financialYear,
+        amount: { type: "number", min: 0 },
+      },
+      async handler(ctx) {
+        const { id, amount } = ctx.params;
+        const data = await this.adapter.findOne({
+          _id: new ObjectID(id),
+        });
+        if (!data) return this.error("ERROR: No data found!");
+        await this.adapter.collection.updateOne(
+          {
+            _id: new ObjectID(id),
+          },
+          { $set: { amount: amount } }
+        );
+        return this.success("Updated Overtime Amount Successfully!");
+      },
+    },
+    updateLoansAndAdvanceSalaryByID: {
+      params: {
+        userId: { type: "objectID", ObjectID },
+        month: { type: "number", min: 0 },
+        id: { type: "objectID", ObjectID },
+        financialYear: customValidators.financialYear,
+        amount: { type: "number", min: 0 },
+      },
+      async handler(ctx) {
+        const { id, amount } = ctx.params;
+        const data = await this.adapter.findOne({
+          _id: new ObjectID(id),
+        });
+        if (!data) return this.error("ERROR: No data found!");
+        await this.adapter.collection.updateOne(
+          {
+            _id: new ObjectID(id),
+          },
+          { $set: { amount: amount } }
+        );
+        return this.success("Updated Month Close Successfully!");
+      },
+    },
+    getLoansAndAdvanceSalaryByRefID: {
+      params: {
+        organisationId: { type: "uuid" },
+        month: { type: "number", min: 0 },
+        referenceID: { type: "objectID", ObjectID },
+        financialYear: customValidators.financialYear,
+      },
+      async handler(ctx) {
+        const { referenceID, month, financialYear, organisationId, type } =
+          ctx.params;
+        return this.adapter.findOne({
+          referenceID,
+          month,
+          financialYear,
+          organisationId,
+          type,
+        });
+      },
+    },
+    //Internal Functions
+    addMultipleMonthClose: {
+      async handler(ctx) {
+        try {
+          const mcloseArray = ctx.params;
+          if (mcloseArray.length === 0) return false;
+          await this.adapter.collection.insertMany(mcloseArray);
+          return true;
+        } catch (err) {
+          this.logger.error(err.message || errors.createError);
+          return false;
+        }
+      },
+    },
+    //conversion
+    updateAllMcloseUserModels: {
+      async handler() {
+        const allMclose = await this.adapter.find({});
+        for (let mclose of allMclose) {
+          const { _id } = mclose;
+          let pan = "";
+          if (Object.prototype.hasOwnProperty.call(mclose, "PAN")) {
+            pan = mclose.PAN;
+          } else if (Object.prototype.hasOwnProperty.call(mclose, "user")) {
+            pan = mclose.user.PAN;
+          } else {
+            continue;
+          }
+          const userObj = await this.broker.call("users.fetchUserByPAN", {
+            PAN: pan,
+          });
+          await this.adapter.collection.updateOne(
+            { _id: new ObjectID(_id) },
+            {
+              $set: {
+                user: userObj,
+              },
+            }
+          );
+        }
+        return "Updated Successfully!";
+      },
+    },
+
+    getEmployeeOvertimeAmount: {
+      params: {
+        userId: customValidators.objectID,
+        month: { type: "number", min: 0 },
+        financialYear: customValidators.financialYear,
+        component: { type: "enum", values: ["Basic", "Gross"], optional: true },
+        overtimeHoursCount: { type: "number", min: 0, max: 10, optional: true },
+        overtimeSetting: {
+          type: "object",
+          props: {
+            component: { type: "enum", values: ["Basic", "Gross"] },
+            factor: { type: "number", min: 1 },
+            workingHours: { type: "number", min: 1 },
+          },
+        },
+      },
+      async handler(ctx) {
+        try {
+          let {
+            userId,
+            month,
+            financialYear,
+            component,
+            overtimeHoursCount,
+            overtimeSetting,
+          } = ctx.params;
+          console.log(ctx.params);
+          let employeeDetails = await this.broker.call("users.fetchUserById", {
+            id: userId,
+          });
+          let { groupId } = employeeDetails;
+          let payslipDetails = await this.broker.call(
+            "ctc.getCTCPayslipByMonth",
+            {
+              id: userId,
+              month: month,
+              financialYear: financialYear,
+            }
+          );
+          if (!payslipDetails || !payslipDetails.data) {
+            payslipDetails = {};
+            payslipDetails.data = await this.getFinalPayslip(
+              userId,
+              financialYear,
+              month
+            );
+          }
+          const year = getYearFromFY(financialYear, month);
+          //getting the payslip of the given month for overtime calculation
+          let { basic, totalFixedIncome } = payslipDetails.data;
+          const type = { Basic: basic, Gross: totalFixedIncome };
+          let currentYear = financialYear.substring(0, 4);
+          let daysInMonth = new Date(currentYear, month + 1, 0).getDate();
+          //if the group does not contains its own overtime setting use the organisation overtime setting for factor
+          let factor = overtimeSetting["factor"];
+          let groupDetails = await this.broker.call(
+            "groups.getGroupByGroupId",
+            {
+              groupId,
+            }
+          );
+          //if the group contains its own overtime setting then
+          if (groupDetails?.overtimeSetting) {
+            factor = groupDetails.overtimeSetting.factor;
+          }
+          if (
+            !(
+              !employeeDetails.overtimeConfiguration ||
+              !employeeDetails.overtimeConfiguration.year
+            ) &&
+            employeeDetails.overtimeConfiguration.month === month &&
+            employeeDetails.overtimeConfiguration.year === year
+          ) {
+            daysInMonth = employeeDetails.overtimeConfiguration.overtimeDays;
+          }
+          let amountPerHour =
+            (type[component] / overtimeSetting["workingHours"] / daysInMonth) *
+            factor;
+          let totalOvertimeAmount = Math.round(
+            amountPerHour * overtimeHoursCount
+          );
+          return { totalOvertimeAmount, amountPerHour };
+        } catch (error) {
+          this.logger.error(error.message || error);
+          return this.error(
+            "Error occurred during overtime amount calculation"
+          );
+        }
+      },
+    },
+  },
+  methods: {
+    async getTotalFnFDays({
+      lastDayOfWorking,
+      month,
+      year,
+      organisationId,
+      groupId,
+    }) {
+      const organisation = await this.broker.call(
+        "users.getOrganisationByOrganisationId",
+        { organisationId }
+      );
+      if (!organisation) return null;
+      const { organisationSettings } = organisation;
+      let daysInMonth = 0;
+      let totalPresentDays = 0;
+      let totalLOPDays = 0;
+      // check for salary run date
+      // if -1 means its the date of end month
+      // if others values means, [ previous month date to current month that date ]
+      // which is always the previous month days in month;
+      if (
+        organisationSettings.isCurrentMonth === undefined ||
+        organisationSettings.isCurrentMonth === true ||
+        !organisationSettings.salaryCycleDate ||
+        organisationSettings.salaryCycleDate == -1
+      ) {
+        daysInMonth = month === 1 && isLeapYear(year) ? 29 : monthDays[month];
+      } else {
+        daysInMonth =
+          month - 1 === 1 && isLeapYear(year) ? 29 : monthDays[month - 1];
+      }
+      const weeklyOffs = await this.broker.call(
+        "weeklyOff.getWeeklyOffByGroupIdAndOrganisationId",
+        {
+          groupId,
+          organisationId,
+        }
+      );
+      const { weeklyOffOne, weeklyOffTwo } = weeklyOffs
+        ? weeklyOffs
+        : { weeklyOffOne: 0, weeklyOffTwo: 0 };
+      if (organisationSettings.isWeekOffsExcludedInLOP) {
+        const totalWeekOff = getTotalWeeklyOffs({
+          weeklyOffOne,
+          weeklyOffTwo,
+          daysInMonth,
+          month,
+          year,
+        });
+        daysInMonth = daysInMonth - totalWeekOff;
+      }
+      if (organisationSettings.isHolidayExcludedInLOP) {
+        const holidays = await this.broker.call(
+          "holiday.getHolidaysForMonthAndYear",
+          {
+            groupId,
+            organisationId,
+            month: parseInt(month) + 1,
+            year,
+          }
+        );
+        daysInMonth = daysInMonth - holidays.length;
+      }
+
+      const { day: leavingDay, month: leavingMonth } =
+        dateDestruct(lastDayOfWorking);
+
+      if (
+        leavingMonth - 1 < month ||
+        (leavingMonth - 1 == month &&
+          leavingDay <= (organisationSettings.salaryCycleDate ?? daysInMonth))
+      ) {
+        return { daysInMonth, totalPresentDays: 0, totalLOPDays: daysInMonth };
+      }
+      if (
+        organisationSettings.salaryCycleDate !== undefined &&
+        organisationSettings.salaryCycleDate !== -1
+      ) {
+        // Including both days (+2)
+        totalPresentDays = Math.abs(
+          organisationSettings.salaryCycleDate - leavingDay
+        );
+        totalLOPDays = Math.abs(
+          organisationSettings.salaryCycleDate -
+            totalPresentDays +
+            (daysInMonth - organisationSettings.salaryCycleDate)
+        );
+      } else {
+        totalPresentDays = daysInMonth - leavingDay + 1;
+        totalLOPDays = daysInMonth = totalPresentDays;
+      }
+      return { daysInMonth, totalPresentDays, totalLOPDays };
+    },
+    async getTotalWorkingDays({
+      dateOfJoining,
+      organisationId,
+      month,
+      year,
+      groupId,
+      organisationSettings,
+      user,
+    }) {
+      let daysInMonth = 0;
+      let totalPresentDays = 0;
+
+      if (
+        !(
+          !user.totalWorkingConfiguration ||
+          !user.totalWorkingConfiguration.year
+        ) &&
+        user.totalWorkingConfiguration.month === month &&
+        user.totalWorkingConfiguration.year === year
+      ) {
+        daysInMonth = user.totalWorkingConfiguration.totalWorkingDays;
+      } else {
+        // check for salary run date
+        // if -1 means its the date of end month
+        // if others values means, [ previous month date to current month that date ]
+        // which is always the previous month days in month;
+        if (
+          organisationSettings.isCurrentMonth === undefined ||
+          organisationSettings.isCurrentMonth === true ||
+          !organisationSettings.salaryCycleDate ||
+          organisationSettings.salaryCycleDate == -1
+        ) {
+          daysInMonth = month === 1 && isLeapYear(year) ? 29 : monthDays[month];
+        } else {
+          daysInMonth =
+            month - 1 === 1 && isLeapYear(year) ? 29 : monthDays[month - 1];
+        }
+        const weeklyOffs = await this.broker.call(
+          "weeklyOff.getWeeklyOffByGroupIdAndOrganisationId",
+          {
+            groupId,
+            organisationId,
+          }
+        );
+        const { weeklyOffOne, weeklyOffTwo } = weeklyOffs
+          ? weeklyOffs
+          : { weeklyOffOne: 0, weeklyOffTwo: 0 };
+        if (organisationSettings.isWeekOffsExcludedInLOP) {
+          const totalWeekOff = getTotalWeeklyOffs({
+            weeklyOffOne,
+            weeklyOffTwo,
+            daysInMonth,
+            month,
+            year,
+          });
+          daysInMonth = daysInMonth - totalWeekOff;
+        }
+        if (organisationSettings.isHolidayExcludedInLOP) {
+          const holidays = await this.broker.call(
+            "holiday.getHolidaysForMonthAndYear",
+            {
+              groupId,
+              organisationId,
+              month: parseInt(month) + 1,
+              year,
+            }
+          );
+          daysInMonth = daysInMonth - holidays.length;
+        }
+      }
+
+      const {
+        month: joiningMonth,
+        year: joiningYear,
+        day: dayWhenJoined,
+      } = dateDestruct(dateOfJoining);
+      if (month === joiningMonth - 1 && year === joiningYear) {
+        if (
+          organisationSettings.salaryCycleDate !== undefined &&
+          organisationSettings.salaryCycleDate !== -1
+        ) {
+          totalPresentDays =
+            organisationSettings.salaryCycleDate - dayWhenJoined + 1;
+        } else {
+          totalPresentDays = daysInMonth - dayWhenJoined + 1;
+        }
+      } else {
+        totalPresentDays = daysInMonth;
+      }
+
+      return { daysInMonth, totalPresentDays };
+    },
+    async getLOPAmountFromDays({
+      dateOfJoining,
+      groupId,
+      days,
+      month,
+      costToCompany,
+      organisationId,
+      year,
+      financialYear,
+      id,
+      user,
+    }) {
+      const organisation = await this.broker.call(
+        "users.getOrganisationByOrganisationId",
+        { organisationId }
+      );
+      const { organisationSettings } = organisation;
+      if (parseFloat(days) <= 0 || isNaN(parseFloat(days))) {
+        return 0;
+      }
+      const getWorkingDays = await this.getTotalWorkingDays({
+        dateOfJoining,
+        groupId,
+        organisationId,
+        month: parseInt(month),
+        year: parseInt(year),
+        organisationSettings,
+        user,
+      });
+      const { daysInMonth } = getWorkingDays;
+      let { ctc, variablePercentage, variableAboveCTC } = costToCompany[month];
+      let amount = 0;
+      let monthlySalary = 0;
+      if (
+        organisationSettings.isLopCalculatedFromCTC !== undefined &&
+        organisationSettings.isLopCalculatedFromCTC === false
+      ) {
+        const payslip = await this.broker.call("tax.getDefaultPayslip", {
+          id,
+          month,
+          financialYear,
+        });
+        const { totalFixedIncome } = payslip;
+        monthlySalary = totalFixedIncome;
+      } else {
+        ctc = parseInt(ctc);
+        if (!variableAboveCTC) {
+          variablePercentage = parseInt(variablePercentage)
+            ? parseInt(variablePercentage)
+            : 0;
+          ctc = ctc - (ctc * variablePercentage) / 100;
+        }
+        monthlySalary = ctc / 12;
+      }
+      let pay_per_day = !daysInMonth
+        ? 0
+        : parseInt(monthlySalary) / daysInMonth;
+      amount = pay_per_day * parseFloat(days);
+      return Math.round(amount);
+    },
+    validateMonthClose(monthClose) {
+      const { type, organisationId, details, amount } = monthClose;
+      return !(!type || !organisationId || !details || !amount);
+    },
+    makeMcloseData(
+      keyName,
+      currentEntry,
+      defaultVars,
+      financialYear,
+      applicableMonth,
+      organisationId,
+      userOrg
+    ) {
+      return {
+        username: userOrg.username,
+        id: userOrg._id,
+        organisationId,
+        financialYear,
+        month: applicableMonth,
+        createdAt: Date.now(),
+        details: keyName,
+        subDetails: keyName,
+        amount: currentEntry[keyName],
+        type: defaultVars
+          ? defaultVars[keyName.toLowerCase()]
+            ? defaultVars[keyName.toLowerCase()].type
+            : ""
+          : "",
+        taxable: defaultVars
+          ? defaultVars[keyName.toLowerCase()]
+            ? defaultVars[keyName.toLowerCase()].taxable
+            : ""
+          : "",
+        lopDays: currentEntry.LOP_days,
+      };
+    },
+    employeeMonthCloseCompilation(monthClose) {
+      let employeeObjectCompilation = {};
+      for (let mc of monthClose) {
+        const { user, type, amount, month, financialYear, createdAt } = mc;
+        const { PAN, displayName, currentOrganisationMeta } = user;
+        let tempEmployeeObject = {};
+        if (employeeObjectCompilation[PAN]) {
+          tempEmployeeObject = { ...employeeObjectCompilation[PAN] };
+          tempEmployeeObject[type] += amount;
+          employeeObjectCompilation[PAN] = { ...tempEmployeeObject };
+        } else {
+          tempEmployeeObject = {
+            PAN: PAN,
+            month,
+            financialYear,
+            createdAt,
+            credit: 0,
+            debit: 0,
+            employeeId: currentOrganisationMeta.employeeId,
+            name: displayName,
+          };
+          tempEmployeeObject[type] += amount;
+        }
+        employeeObjectCompilation[PAN] = { ...tempEmployeeObject };
+      }
+      return Object.keys(employeeObjectCompilation).map(
+        (val) => employeeObjectCompilation[val]
+      );
+    },
+
+    async getOverDayAmount({
+      id,
+      month,
+      financialYear,
+      days,
+      component = "Gross",
+      factor = 1,
+    }) {
+      let payslipDetails = await this.broker.call("ctc.getCTCPayslipByMonth", {
+        id: id,
+        month: month,
+        financialYear: financialYear,
+      });
+      if (!payslipDetails || !payslipDetails.data) {
+        payslipDetails = {};
+        payslipDetails.data = await this.getFinalPayslip(
+          id,
+          financialYear,
+          month
+        );
+      }
+      //getting the payslip of the given month for overtime calculation
+      let { basic, totalFixedIncome } = payslipDetails.data;
+      const type = { Basic: basic, Gross: totalFixedIncome };
+      let currentYear = financialYear.substring(0, 4);
+      let daysInMonth = new Date(currentYear, month + 1, 0).getDate();
+      let overDayAmount = Math.round(
+        (type[component] / daysInMonth) * factor * parseInt(days)
+      );
+      return this.success("The Amount is", { overDayAmount });
+    },
+    async getFinalPayslip(id, financialYear, month) {
+      const payslip = await this.broker.call("tax.generatePayslip", {
+        id,
+        financialYear,
+        month,
+        getGraphDataByKey: false,
+        sendGraphData: false,
+        savePayslip: false,
+      });
+      if (!payslip || !payslip.finalPayslip) return null;
+      return payslip.finalPayslip;
+    },
+  },
+};
