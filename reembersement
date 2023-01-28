@@ -1,0 +1,49 @@
+   reimbursementReport: {
+      async handler(ctx) {
+        try {
+          if (!errors.validationCheck(["organisationId"], ctx.params))
+            return this.error(errors.wrongFieldError);
+          const { organisationId, month, financialYear } = ctx.params;
+          let designations = await this.broker.call(
+            "designation.getAllDesignationsByOrganisationId",
+            {
+              organisationId,
+            }
+          );
+          let designationMapper = getDesignationMapper(designations);
+          let reimbursements = await this.adapter.find({
+            query: {
+              organisationId,
+              month: parseInt(month),
+              financialYear,
+              state: 1,
+            },
+          });
+          let employeeDetails = [];
+          for (let rem of reimbursements) {
+            let employeeId = rem.user.currentOrganisationMeta.employeeId;
+            let displayName = rem.user.displayName;
+            let designation = rem.user.designationId
+              ? designationMapper[rem.user.designationId]
+              : "";
+            let category = reimbursementTypes[rem.type];
+            let amount = rem.amount;
+            let appliedOn = new Date(
+              rem.reimbursementBillDate
+            ).toLocaleDateString();
+            employeeDetails.push({
+              employeeId: employeeId,
+              designation: designation,
+              displayName: displayName,
+              category: category,
+              amount: amount,
+              appliedOn: appliedOn,
+            });
+          }
+          return createReimbursementReportExcel(employeeDetails);
+        } catch (err) {
+          this.logger.error(err.message || errors.generatingFileError);
+          return this.error(errors.somethingWrong);
+        }
+      },
+    },
