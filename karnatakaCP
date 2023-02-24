@@ -1,0 +1,475 @@
+// Now functions 
+function kaForm28() {
+    return `
+        <table>
+       
+<h3 style="text-align: center;">Form No.XXVIII</h3>
+<p style="text-align: center;"><strong>(See Rule 78(1) (b))</strong></p>
+<h2 style="text-align: center;">Wages slip</h2>
+        <tr>
+            <td>1</td>
+            <td>Name and address of the establishments</td>
+            <td>Lawcubator Technologies Pvt Ltd <br>758,3rd floor, 19th main, Dollar Scheme layout,HSR Layout 2nd Sector, Bangalore, India-560102</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td>Name of the workman</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td>Fathers /husband name</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>4</td>
+            <td>Designation</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>5</td>
+            <td>Date of entry into service</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>6</td>
+            <td>Wages periods From to </td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>7</td>
+            <td>Wages earned</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td ><div class="flex-col">
+                <p>BASIC </p>
+                <p>HRA</p>
+                <p>CONVEYANCE</p>
+                <p>MEDICAL ALLOWANCE</p>
+                <p>SPECIAL ALLOWANCE</p>
+            </div></td>
+            <td ><div class="flex-col">
+                <p>52,800.00</p>
+                <p>21,120.00</p>
+                <p>1,600.00</p>
+                <p>1,250.00</p>
+                <p>1,250.00</p>
+            </div></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>Gross Wages  </td>
+            <td>103,650.00</td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>Deductions</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td><div class="flex-col">
+                <p>PF </p>
+                <p>PROF TAX </p>
+                <p>INCOME TAX</p>
+            </div></td>
+            <td>
+                <div class="flex-col">
+                    <p></p>
+                    <p></p>
+                    <p></p>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>Net amount paid</td>
+            <td></td>
+        </tr>
+    </table>
+    `;
+}
+function kaFormT() {
+    return `
+</table>
+<tr>
+<th>Form - T</th>
+</tr>
+<tr>
+<td>COMBINED MUSTER ROLL CUM REGISTER OF WAGES
+</td>
+</tr>
+<tr>
+<th>Name and Address of the Employer : </th>
+<td>Lawcubator Technologies Pvt Ltd <br></td>
+</tr>
+<tr>
+<th>Month / Year : </th>
+<td>Jan 2021</td>
+</tr>
+    <tr>
+        <th rowspan="2">Emp
+            Code</th>
+            <th rowspan="2">Name of
+                the
+                Employee</th>
+            <th rowspan="2">Father /
+                Husband
+                Name</th>
+            <th rowspan="2">m/f</th>
+            <th rowspan="2">Designation /
+                Department </th>
+            <th rowspan="2">Date
+                of
+                Joining</th>
+            <th rowspan="2">ESI No
+                (6)
+                </th>
+            <th rowspan="2">ESI No
+                (6)
+                </th>
+            <th rowspan="2">UAN
+            </th>
+            <th rowspan="2"></th>
+            <th colspan="31"></th>
+            <th rowspan="2"></th>
+            <th rowspan="2"></th>
+            <th rowspan="2"></th>
+            <th colspan="6">Earned wage and other allowances </th>
+            <th colspan="4">Deductions</th>
+            <th rowspan="2"></th>
+            <th rowspan="2"></th>
+            <th rowspan="2"></th>
+            <th rowspan="2"></th>
+    </tr>
+    <tr>
+        <td>1</td>
+        <td>2</td>
+        <td>3</td>
+        <td>4</td>
+        <td>5</td>
+        <td>6</td>
+        <td>7</td>
+        <td>8</td>
+        <td>9</td>
+        <td>10</td>
+        <td>11</td>
+        <td>12</td>
+        <td>13</td>
+        <td>14</td>
+        <td>15</td>
+        <td>16</td>
+        <td>17</td>
+        <td>18</td>
+        <td>19</td>
+        <td>20</td>
+        <td>21</td>
+        <td>22</td>
+        <td>23</td>
+        <td>24</td>
+        <td>25</td>
+        <td>26</td>
+        <td>27</td>
+        <td>28</td>
+        <td>29</td>
+        <td>30</td>
+        <td>31</td>
+    </tr>
+</table>`;
+}
+function ptAllStates() {
+    return `
+    <div style="width: 80%; margin: auto;">
+<table>
+    <thead>
+      <p style="text-align: center;"><strong>Lawcubator Technologies Pvt Ltd</strong></p>
+      <tr>
+        <td colspan="5">
+            STATEMENT OF PROFESSION TAX FOR JANUARY 2021 (KARNATAKA)
+        </td>
+      </tr>
+
+
+      <tr>
+        <th>Sr. No.</th>
+        <th>Employee No</th>
+        <th>Name</th>
+        <th>Prof Tax Basic</th>
+        <th>Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+       <tr>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+       </tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5"><strong>Summary</strong></td>
+      </tr>
+      <tr>
+        <th></th>
+        <th></th>
+        <th>Rate</th>
+        <th>No of employees</th>
+        <th>Amount Exempted</th>
+      </tr>
+      <tr>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+      <tr>
+        <th></th>
+        <th></th>
+        <th>Total</th>
+        <th>0</th>
+        <th></th>
+      </tr>
+    </tfoot>
+  </table>
+  <div class="flex-row">
+    <div class="flex-col">
+        <p>-----</p>
+        <p><strong>PREPARED BY</strong></p>
+
+
+    </div>
+    <div class="flex-col">
+        <p>-----</p>
+        <p><strong>CHECKED BY</strong></p>
+    </div>
+  </div>
+</div>
+    `;
+}
+function pt5aKA() {
+    return `
+  <h1>hello</h1>
+`;
+}
+function pt5forKA() {
+    return `
+    <div>
+    <div>
+    <p>( See Rule 11 )</p>
+    <h3><strong>RETURN OF TAX PAYABLE BY EMPLOYER UNDER SUB-SECTION(1) OF SECTION 6-A OF THE <br>KARNATAKA PT ON PROFESSION, TRADE, CALLINGS AND EMPLOYMENT ACT 1976</strong></h3>
+</div>
+<div class="flex-col">
+    <div class="flex-row">
+        <p>Name of the A.P.T.O Circle Number</p>
+        <p>:</p>
+        <p>------------</p>
+    </div>
+    <div class="flex-row">
+        <p>1 Return of tax payable for the year ending on</p>
+        <p>:</p>
+        <p>Year 2020 - 2021</p>
+    </div>
+    <div class="flex-row">
+        <p>2 Name of the employer</p>
+        <p>:</p>
+        <p>Lawcubator Technologies Pvt Ltd</p>
+    </div>
+    <div class="flex-row">
+        <p>3 Address</p>
+        <p>:</p>
+        <p>758,3rd floor, 19th main, Dollar Scheme layout,HSR Layout 2nd Sector, Bangalore,
+            India-560102</p>
+    </div>
+    <div class="flex-row">
+        <p>4 Registration Certificate No</p>
+        <p>:</p>
+        <p>------------------</p>
+    </div>
+    <div class="flex-row">
+        <p>5 Tax paid during the year is as under</p>
+        <p>:</p>
+        <p>---------------</p>
+    </div>
+</div>
+    <table>
+    <tr>
+        <th>Sl No</th>
+        <th>Month</th>
+        <th>Tax Deducted</th>
+        <th>Tax Paid</th>
+        <th>Balance Tax</th>
+        <th>Paid Under Challan No And Date</th>
+    </tr>
+    <tr>
+        <th>1</th>
+        <th>2</th>
+        <th>3</th>
+        <th>4</th>
+        <th>5</th>
+        <th>6</th>
+    </tr>
+</table>
+<div class="flex-col">
+    <div class="flex-row">
+        <p>6 Total tax payble for the year ending</p>
+        <p>:</p>
+        <p>------------</p>
+    </div>
+    <div class="flex-row">
+        <p>7 Tax paid as per monthly statement</p>
+        <p>:</p>
+        <p>--------</p>
+    </div>
+    </div class="flex-row">
+        <p>8 Balance tax payable</p>
+        <p>:</p>
+        <p>--------</p>
+    </div>
+    <div class="flex-row">
+        <p>9 Balance tax paid under challan no</p>
+        <p>:</p>
+        <p>------------</p>
+    </div>
+</div>
+
+
+<p>I certify that all the employees who are liable to pay tax in my employment during the period of return have been covered
+    by the foregoing particulars. I also certify that the necessary revision in the amount of tax deductable from the salary or
+    wages of the employees on account variation in the salary or wages earned by them has been made wherever
+    necessary. <br>I, solemnly declare that the above statements are true to the best of my knowledge and belief.</p>
+    <br>
+    <div class="flex-row">
+        <p>Place: <span>----</span></p>
+        <p>Signature of the employer: <span>-----</span></p>
+    </div>
+    <div class="flex-row">
+        <p>Date: <span>----</span></p>
+        <p>Status: <span>-----</span></p>
+    </div>
+    </div>
+    `;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ KA: {
+        ...commonFieldsForSouth,
+        ptForm5A: {
+            staticAction: false,
+            label: "Form 5A ",
+            header: pt5aKA,
+            keys: [],
+            dataSet: [],
+            paperSize: "A4",
+            paperOrientation: "landscape",
+            isHeightWidth: false,
+            height: "0px",
+            width: "0px",
+            iterative: false,
+            columnSize: "1000",
+            genderSpecific: -1, // -1 : all , 0 : male, 1: female
+        },
+        ptForm5: {
+            staticAction: false,
+            label: "Form 5",
+            header: pt5forKA,
+            keys: [],
+            dataSet: [],
+            paperSize: "A4",
+            paperOrientation: "landscape",
+            isHeightWidth: false,
+            height: "0px",
+            width: "0px",
+            iterative: false,
+            columnSize: "1000",
+            genderSpecific: -1, // -1 : all , 0 : male, 1: female
+        },
+        ptAllStates: {
+            staticAction: false,
+            label: "All States PT Reports",
+            header: ptAllStates,
+            keys: [],
+            dataSet: [],
+            paperSize: "A4",
+            paperOrientation: "landscape",
+            isHeightWidth: false,
+            height: "0px",
+            width: "0px",
+            iterative: false,
+            columnSize: "1000",
+            genderSpecific: -1, // -1 : all , 0 : male, 1: female
+        },
+        formT: {
+            staticAction: false,
+            label: "Form T",
+            header: kaFormT,
+            keys: [],
+            dataSet: [],
+            paperSize: "A4",
+            paperOrientation: "landscape",
+            isHeightWidth: false,
+            height: "0px",
+            width: "0px",
+            iterative: false,
+            columnSize: "1000",
+            genderSpecific: -1, // -1 : all , 0 : male, 1: female
+        },
+        form28: {
+            staticAction: false,
+            label: "Form 28",
+            header: kaForm28,
+            keys: [],
+            dataSet: [],
+            paperSize: "A4",
+            paperOrientation: "landscape",
+            isHeightWidth: false,
+            height: "0px",
+            width: "0px",
+            iterative: false,
+            columnSize: "1000",
+            genderSpecific: -1, // -1 : all , 0 : male, 1: female
+        },
+    },
