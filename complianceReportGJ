@@ -1,0 +1,1183 @@
+function form15ForGJ() {
+  return `<table>
+    <thead>
+        <tr>
+            <th rowspan="2">Serial No </th>
+            <th rowspan="2">Name</th>
+            <th rowspan="2">Date of birth</th>
+            <th rowspan="2">Sex</th>
+            <th rowspan="2">Residential
+                address
+                </th>
+            <th rowspan="2">Father's /
+                Husband's
+                Name</th>
+            <th rowspan="2">Date of
+                appointment</th>
+            <th colspan="2">Group to which worker
+                belongs </th>
+            <th rowspan="2">Number of
+                relay if
+                working in
+                shifts
+                </th>
+            <th colspan="2">Adolescent if certified as
+                adults </th>
+            <th rowspan="2">Remarks</th>
+        </tr>
+        <tr>
+            <th>Alphabet
+                Assigned</th>
+            <th>Nature of
+                work</th>
+            <th>Number &
+                date of
+                certificate
+                of fitness </th>
+            <th>No under
+                section
+                </th>
+        </tr>
+        <tr>
+            <th>1</th>
+            <th>2</th>
+            <th>3</th>
+            <th>4</th>
+            <th>5</th>
+            <th>6</th>
+            <th>7</th>
+            <th>8</th>
+            <th>9</th>
+            <th>10</th>
+            <th>11</th>
+            <th>12</th>
+            <th>13</th>
+        </tr>
+    </thead>
+    <tbody>
+          <tr>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+           <td></td>
+        </tr>`;
+};
+function form18ForGJ() {
+  return `<div>
+<div style="display: flex; flex-direction: row;">
+    <table>
+        <tr>
+            <td>1. Name : </td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>2. Sex :</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>3. Father's/Husband's Name :</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>4. Serial No in the Register of Adult/Child workers :</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>5. Department : </td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>6. Designation :</td>
+            <td></td>
+        </tr>
+    </table>
+    <table id="no-grid">
+        <tr>
+            <td>7. Date of joining employment :</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>8. Date of discharge/dismissal/quitting employment/
+                superannuation/death while in service :
+                </td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>9. Date of payment in lieu of leave with wages due
+                in such cases :
+                </td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>10. Whether leave in accordance with scheme
+                under section 79(8) was refused :</td>
+            <td></td>
+        </tr>
+    </table>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2">Calendar
+                year of
+                Service
+                (i.e
+                previous
+                year)
+                </th>
+            <th colspan="2">Leave due as on
+                1st January of
+                the year in Col 1</th>
+            <th colspan="3">Leave availed during the year</th>
+            <th rowspan="2">Leave
+                refused
+                out of
+                regular
+                leave
+                mentioned
+                in
+                column
+                3
+                </th>
+            <th colspan="5">Number of working days for computation
+                of leave during the year mentioned in
+                column (1)
+                </th>
+            <th rowspan="2">Regular
+                leave
+                earned
+                for the
+                year
+                mentioned
+                in
+                column(1)</th>
+            <th colspan="2">Balance of leave
+                admissible on
+                1st January of
+                the year
+                following the
+                year mentioned
+                in column(1)
+                </th>
+            <th rowspan="2">Leave
+                period
+                (i.e Col
+                (4)+
+                Col (5)
+                in days</th>
+            <th rowspan="2">Normal
+                rate of
+                wages
+                excluding
+                of any
+                overtime
+                as well
+                as
+                bonus
+                but
+                including
+                of
+                dearness
+                allowance
+                (Rs.)
+                </th>
+            <th colspan="3">Details of wages paid</th>
+            <th rowspan="2">Signature</th>
+        </tr>
+        <tr>
+            <th>Refused</th>
+            <th>Regular</th>
+            <th>Refused</th>
+            <th>Regular</th>
+            <th>Dates</th>
+            <th>Days
+                worked </th>
+            <th>Lay of</th>
+            <th>Maternity
+                Leave
+                up to
+                26
+                weeks</th>
+            <th>Leave
+                with
+                wages
+                enjoyed</th>
+            <th>Total
+                (9) to
+                (12)</th>
+            <th>Refused(Col
+                2+8 - 4)</th>
+            <th>Regular(Col
+                3+14-5-8</th>
+            <th>Cash
+                equivalent
+                of the
+                advantages
+                accruing
+                through
+                the
+                concessional
+                sale of
+                food
+                grains
+                and
+                other
+                articles</th>
+            <th>Rates
+                of
+                wages
+                for
+                leave
+                with
+                wages
+                paid
+                Rs.
+                (Col 18
+                + Col
+                19)</th>
+            <th>Total
+                wages
+                paid
+                for the
+                period
+                of
+                leave
+                with
+                wages
+                enjoyed
+                Rs.
+                (Col 17
+                x Col
+                20)
+                </th>
+        </tr>
+        <tr>
+            <th>1</th>
+            <th>2</th>
+            <th>3</th>
+            <th>4</th>
+            <th>5</th>
+            <th>6</th>
+            <th>7</th>
+            <th>8</th>
+            <th>9</th>
+            <th>10</th>
+            <th>11</th>
+            <th>12</th>
+            <th>13</th>
+            <th>14</th>
+            <th>15</th>
+            <th>16</th>
+            <th>17</th>
+            <th>18</th>
+            <th>19</th>
+            <th>20</th>
+            <th>21</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+        </tr>
+    </tbody>
+</table>
+</div>`;
+}
+function form5ForGJ({ organisationName, employerNameAndAddress, startDate, endDate, month }) {
+  return `<table>
+        <tr>
+            <td>Name of the Establishment </td>
+            <td>:</td>
+            <td>${organisationName} </td>
+        </tr>
+        <tr>
+            <td>Place:</td>
+            <td>:</td>
+            <td>${employerNameAndAddress}</td>
+        </tr>
+        <tr>
+            <td>Wage period From</td>
+            <td>:</td>
+            <td>${startDate} </td>
+        </tr>
+        <tr>
+            <td>To</td>
+            <td>:</td>
+            <td>${endDate}</td>
+        </tr>
+        <tr>
+            <td>Month</td>
+            <td>:</td>
+            <td>${monthList[month] + ""}</td>
+        </tr>
+    </table>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Sr.no</th>
+            <th>Employee Id</th>
+            <th>Name of the Employee</th>
+            <th>Designation</th>
+            <th>Days</th>
+            <th>Total Present  Days</th>
+            <th>Rate of Pay</th>
+            <th>Pay Amount</th>
+            <th>Advances</th>
+            <th>Net Pay Salary</th>
+            <th>Sign/ Account No</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+        </tr>`;
+}
+function formA1ForGJ({ organisationName, employerNameAndAddress, establishmentType, totalEmployeeCountWithinThePeriod,
+  employee_LWF, employer_LWF, paymentMethod, year, month }) {
+  return `<link rel="stylesheet" href="./../../styles.css">
+
+<h3 style="text-align: center;">Form G - Register of Employment and Remuneration</h3>
+<p style="text-align: center;"><strong>(Vide Rule 14 of Delhi Shops and Establishment Rules, 1954)</strong></p>
+
+<style>
+    #no-grid table{
+        border: none;
+
+    }
+    #no-grid td{
+        border: none;
+        text-align: left;
+    }
+    #no-grid tr{
+        border: none;
+    }
+
+ 
+</style>
+
+<div id="no-grid">
+    <table>
+        <tr>
+            <td>1. Name of the Establishment </td>
+            <td>:</td>
+            <td>${organisationName}</td>
+        </tr>
+        <tr>
+            <td>2. Name of Employer</td>
+            <td>:</td>
+            <td>${employerNameAndAddress}</td>
+        </tr>
+        <tr>
+            <td>3. Type of Establishment
+                (i.e. whether factory, motor omnibus service, motor transport
+                undertaking or commercial establishment, a shop, a residential
+                hotel, restaurant, eating, house, theater or other place of
+                amusement or public entertainment ).</td>
+            <td>:</td>
+            <td>${establishmentType}</td>
+        </tr>
+        <tr>
+            <td>4. Total number of employees as on 01st January and 30th June on
+                companies roll
+                </td>
+            <td>:</td>
+            <td>${totalEmployeeCountWithinThePeriod}</td>
+        </tr>
+        <tr>
+            <td>5. . (a) Employees contribution as per sr. no.5  <br> (b) Employers contribution as per sr. no.5 </td>
+            <td>: <br> :</td>
+            <td>Rs. ${employee_LWF + "/-"} per Employee <br> Rs. ${employer_LWF + "/-"} per Employee            </td>
+        </tr>
+    </table>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Total Amount Payable</th>
+            <th>Contribution from
+                Employer</th>
+            <th>Contribution from
+                Employee</th>
+            <th>Total Employee</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>${(employee_LWF * totalEmployeeCountWithinThePeriod) + (employer_LWF * totalEmployeeCountWithinThePeriod) + ""}</td>
+            <td>${employer_LWF * totalEmployeeCountWithinThePeriod + ""}</td>
+            <td>${employee_LWF * totalEmployeeCountWithinThePeriod + ""}</td>
+            <td>${totalEmployeeCountWithinThePeriod}</td>
+        </tr>
+    </tbody>
+
+</table>
+<div id="no-grid">
+    <table>
+        <tr>
+            <td>6. Contribution payable to Welfare Commissioner <br> (a) No. of Employees and Employees Contribution <br> <br>(b) Employers Contribution <br>(c) Mode of Payment
+                (Cheque / Cash / DD)
+                 </td>
+            <td>: <br> : <br><br> : <br> :</td>
+            <td>${(employee_LWF * totalEmployeeCountWithinThePeriod) + (employer_LWF * totalEmployeeCountWithinThePeriod) + ""}<br>${totalEmployeeCountWithinThePeriod} <br>${employee_LWF}<br>${employer_LWF} <br>${paymentMethod}</td>
+        </tr>
+        <tr>
+            <td>7. Reason for nonpayment of contribution or Less payment of
+                contribution </td>
+            <td>:</td>
+            <td></td>
+        </tr>
+    </table>
+</div>
+<div style="display: flex; flex-direction: row; justify-content: space-between;">
+    <p>Date :${new Date().getDate() + " " + monthList[month] + " " + year}  2023 </p>
+    <p>Employers Signature</p>
+</div>`;
+}
+function form4AForGJ({ organisationName, employerNameAndAddress, wagePeriod }) {
+  return ` <thead>
+        <tr>
+            <td>Name of Establishment :</td>
+            <td>${organisationName}</td>
+        </tr>
+        <tr>
+            <td>Place :</td>
+            <td>${employerNameAndAddress}</td>
+        </tr>
+        <tr>
+            <td>Wage period from :</td>
+            <td>${wagePeriod}</td>
+        </tr>
+    </thead>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2">Sr.No</th>
+            <th rowspan="2">Employee Id</th>
+            <th rowspan="2">Name of the employee</th>
+            <th rowspan="2">Father/Husband's Name
+            <th rowspan="2">Designation</th>
+            <th rowspan="2">Total attendance/ units of work done</th>
+            <th colspan="2">Minimum rates of wages payable</th>
+            <th colspan="2">Rates of wages actually paid</th>
+            <th rowspan="2">Over time worked</th>
+            <th rowspan="2">Gross wages Payable</th>
+            <th colspan="5">Deduction</th>
+            <th rowspan="2">Wages Paid</th>
+            <th rowspan="2">Date of Payment</th>
+            <th rowspan="2">Signature or thumb impression of employees</th>
+        </tr>
+        <tr>
+            <th>Basic</th>
+            <th>DA</th>
+            <th>Basic</th>
+            <th>DA</th>
+            <th>Employee's contribution to PF</th>
+            <th>ESI contribution</th>
+            <th>House Rent</th>
+            <th>other deduction</th>
+            <th>Total deduction</th>
+
+        </tr>
+    </thead>`;
+}
+function form25ForGJ({ year, registrationNumber, licenceNumber, NICCode, organisationName, occupierName,
+  managerName, district, locationAddress, industry, industryNature, sector, noOfDaysFactoryWorked, adolescentMen, adolescentWomen,
+  adultMen, adultWomen, childrenFemale, childrenMen, fullTimeEmployee, partTimeEmployee, totalNumberOfEmployeeInHazardousProcess, others,
+  month, namesOfAgents, workerExaminedByMedicalOfficer }) {
+  return `<link rel="stylesheet" href="./../../styles.css">
+
+<h3 style="text-align: center;">Form 25</h3>
+<p style="text-align: center;">(See clause 2 of Rule 107 of Gujarat Factories Rules, 1963)</p>
+<p style="text-align: center;"><strong>Half Yearly Return</strong></p>
+<p>For the half year ending 30 Jun ${year + ""}</p>
+<p>(This return should be sent to the prescribed authority latest by 15the July of current year. Specify details as given in licence)</p>
+
+<style>
+    #no-grid table{
+        border: none;
+
+    }
+    #no-grid td{
+        border: none;
+        text-align: left;
+    }
+    #no-grid tr{
+        border: none;
+    }
+
+ 
+</style>
+
+<div id="no-grid">
+    <table>
+        <tr>
+            <td>Registration No </td>
+            <td>:</td>
+            <td>${registrationNumber}</td>
+        </tr>
+        <tr>
+            <td>Licence No </td>
+            <td>:</td>
+            <td>${licenceNumber}</td>
+        </tr>
+        <tr>
+            <td>NIC Code No <br>(as given in the licence)</td>
+            <td>:</td>
+            <td>${NICCode}</td>
+        </tr>
+        <tr>
+            <td>1. Name of the Factory</td>
+            <td>:</td>
+            <td>${organisationName}</td>
+        </tr>
+        <tr>
+            <td>2. Name of the Occupier </td>
+            <td>:</td>
+            <td>${occupierName}</td>
+        </tr>
+        <tr>
+            <td>3. Name of the Manager</td>
+            <td>:</td>
+            <td>${managerName}</td>
+        </tr>
+        <tr>
+            <td>4. District</td>
+            <td>:</td>
+            <td>${district}</td>
+        </tr>
+        <tr>
+            <td>5. Full Postal Address of the factory (including PIN code) </td>
+            <td>:</td>
+            <td>${locationAddress}</td>
+        </tr>
+        <tr>
+            <td>6. Industry</td>
+            <td>:</td>
+            <td>${industry}</td>
+        </tr>
+        <tr>
+            <td>a) Nature of industry(See explanatory note-1)</td>
+            <td>:</td>
+            <td>${industryNature}</td>
+        </tr>
+        <tr>
+            <td>b) Sector of Industry (Mention whether Establishment belongs to Public 
+                or Private Sector(see explanatory note-2)</td>
+            <td>:</td>
+            <td>${sector}</td>
+        </tr>
+        <tr>
+            <td>c) Section of the Act under which the Factory is covered Please tick [ ] 
+                the appropriate box.
+                </td>
+            <td>:</td>
+            <td>2m(i) <br>
+                2m(ii) <br>
+                Section 85</td>
+        </tr>
+        <tr>
+            <td>7. Number of days factory worked during the half year ending 30 
+                Jun ${year + ""}</td>
+            <td>:</td>
+            <td>${noOfDaysFactoryWorked}</td>
+        </tr>
+        <tr>
+            <td>8. Number of mandays worked during the half-year ending 30 Jun ${year + ""}s
+            </td>
+        </tr>
+    </table>
+</div>
+<table>
+    <tr>
+        <td rowspan="2">(a) Adults</td>
+        <td >Men</td>
+        <td>${adultMen}</td>
+    </tr>
+    <tr>
+        <td >Women</td>
+        <td >${adultWomen}</td>
+    </tr>
+    <tr>
+        <td rowspan="2">(b) Adolescent</td>
+        <td colspan="1">Men</td>
+        <td colspan="1">${adolescentMen}</td>
+    </tr>
+    <tr>
+        <td >Women</td>
+        <td >${adolescentWomen}</td>
+    </tr>
+    <tr>
+        <td rowspan="2">(c) Children</td>
+        <td colspan="1">Men</td>
+        <td colspan="1">${childrenMen}</td>
+    </tr>
+
+    <tr>
+        <td>Women</td>
+        <td>${childrenFemale}</td>
+    </tr>
+</table>
+<p>9. Average number of workers employed daily(See explanatory note- 3) :</p>
+<table>
+    <tr>
+        <td rowspan="2">(a) Adults</td>
+        <td >Men</td>
+        <td>${adultMen}</td>
+    </tr>
+    <tr>
+        <td >Women</td>
+        <td >${adultWomen}</td>
+    </tr>
+    <tr>
+        <td rowspan="2">(b) Adolescent</td>
+        <td colspan="1">Men</td>
+        <td colspan="1">${adolescentMen}</td>
+    </tr>
+    <tr>
+        <td >Women</td>
+        <td >${adolescentWomen}</td>
+    </tr>
+    <tr>
+        <td rowspan="2">(c) Children</td>
+        <td colspan="1">Men</td>
+        <td colspan="1">${childrenMen}</td>
+    </tr>
+
+    <tr>
+        <td>Women</td>
+        <td>${childrenFemale}</td>
+    </tr>
+</table>
+<div id="no-grid">
+    <table>
+        <tr>
+            <td>10. Medical Information</td>\
+        </tr>
+        <tr>
+            <td>a) Total number of workers employed in Hazardous processes </td>
+            <td>:</td>
+            <td>${totalNumberOfEmployeeInHazardousProcess + ""}</td>
+        </tr>
+        <tr>
+            <td>b) Name of the hazardous agents </td>
+            <td>:</td>
+            <td>${namesOfAgents}</td>
+        </tr>
+        <tr>
+            <td>c) Number of medical officers employed <br> i) Full time  <br>ii) Part time</td>
+            <td>: <br> : <br>:</td>
+            <td>${(fullTimeEmployee + partTimeEmployee) + ""} <br>${fullTimeEmployee + ""}<br>${partTimeEmployee + ""}</td>
+        </tr>
+        <tr>
+            <td>d) Number of workers examined by Factory Medical Officer <br>i) Workers working in hazardous process <br> ii) Others</td>
+            <td>: <br> : <br>:</td>
+            <td>${workerExaminedByMedicalOfficer} <br>${totalNumberOfEmployeeInHazardousProcess + ""} <br>${others}</td>
+        </tr>
+    </table>
+</div>
+<p>Certified that the information furnished above is, to the best of my knowledge and belief, correct.</p>
+<div style="display: flex; flex-direction: row; justify-content: space-between;">
+    <p>Date :${new Date().getDate()} ${monthList[month]} ${year + ""} </p>
+    <p>Signature of the Manager</p>
+</div>
+`;
+};
+function form19ForGJ({ employeeName, department, designation, dateOfJoining, lastDayOfWorking, gender, fatherNameOrHusbandName,
+  serialNumberInRegister, paymentDate, isLeaveRefused }) {
+  return `<link rel="stylesheet" href="./../../styles.css">
+<style>
+    #no-grid table{
+        border: none;
+
+    }
+    #no-grid td{
+        border: none;
+        text-align: left;
+    }
+    #no-grid tr{
+        border: none;
+    } 
+</style>
+<div>
+<div>
+<h3 style="text-align: center;">Form 19</h3>
+<p style="text-align: center;">(See Rule 95 of The Gujarat Factories Rules, 1963)</p>
+<p style="text-align: center;"><strong>Leave Book</strong></p>
+</div>
+<div style="display: flex; flex-direction: row;">
+    <table id="no-grid">
+        <tr>
+            <td>1. Name : </td>
+            <td>${employeeName}</td>
+        </tr>
+        <tr>
+            <td>2. Sex :</td>
+            <td>${gender}</td>
+        </tr>
+        <tr>
+            <td>3. Father's/Husband's Name :</td>
+            <td>${fatherNameOrHusbandName}</td>
+        </tr>
+        <tr>
+            <td>4. Serial No in the Register of Adult/Child workers :</td>
+            <td>${serialNumberInRegister}</td>
+        </tr>
+        <tr>
+            <td>5. Department : </td>
+            <td>${department}</td>
+        </tr>
+        <tr>
+            <td>6. Designation :</td>
+            <td>${designation}</td>
+        </tr>
+    </table>
+    <table id="no-grid">
+        <tr>
+            <td>7. Date of joining employment :</td>
+            <td>${dateOfJoining}</td>
+        </tr>
+        <tr>
+            <td>8. Date of discharge/dismissal/quitting employment/
+                superannuation/death while in service :
+                </td>
+            <td>${lastDayOfWorking}</td>
+        </tr>
+        <tr>
+            <td>9. Date of payment in lieu of leave with wages due
+                in such cases :
+                </td>
+            <td>${paymentDate}</td>
+        </tr>
+        <tr>
+            <td>10. Whether leave in accordance with scheme
+                under section 79(8) was refused :</td>
+            <td>${isLeaveRefused}</td>
+        </tr>
+    </table>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2">Calendar
+                year of
+                Service
+                (i.e
+                previous
+                year)
+                </th>
+            <th colspan="2">Leave due as on
+                1st January of
+                the year in Col 1</th>
+            <th colspan="3">Leave availed during the year            </th>
+            <th rowspan="2">Leave
+                refused
+                out of
+                regular
+                leave
+                mentioned
+                in
+                column
+                3
+                </th>
+            <th colspan="5">Number of working days for computation
+                of leave during the year mentioned in
+                column (1)
+                </th>
+            <th rowspan="2">Regular
+                leave
+                earned
+                for the
+                year
+                mentioned
+                in
+                column(1)</th>
+            <th colspan="2">Balance of leave
+                admissible on
+                1st January of
+                the year
+                following the
+                year mentioned
+                in column(1)
+                </th>
+            <th rowspan="2">Leave
+                period
+                (i.e Col
+                (4)+
+                Col (5)
+                in days</th>
+            <th rowspan="2">Normal
+                rate of
+                wages
+                excluding
+                of any
+                overtime
+                as well
+                as
+                bonus
+                but
+                including
+                of
+                dearness
+                allowance
+                (Rs.)
+                </th>
+            <th colspan="3">Details of wages paid</th>
+            <th rowspan="2">Signature</th>
+        </tr>
+        <tr>
+            <th>Refused</th>
+            <th>Regular</th>
+            <th>Refused</th>
+            <th>Regular</th>
+            <th>Dates</th>
+            <th>Days
+                worked </th>
+            <th>Lay of</th>
+            <th>Maternity
+                Leave
+                up to
+                26
+                weeks</th>
+            <th>Leave
+                with
+                wages
+                enjoyed</th>
+            <th>Total
+                (9) to
+                (12)</th>
+            <th>Refused(Col
+                2+8 - 4)</th>
+            <th>Regular(Col
+                3+14-5-8</th>
+            <th>Cash
+                equivalent
+                of the
+                advantages
+                accruing
+                through
+                the
+                concessional
+                sale of
+                food
+                grains
+                and
+                other
+                articles</th>
+            <th>Rates
+                of
+                wages
+                for
+                leave
+                with
+                wages
+                paid
+                Rs.
+                (Col 18
+                + Col
+                19)</th>
+            <th>Total
+                wages
+                paid
+                for the
+                period
+                of
+                leave
+                with
+                wages
+                enjoyed
+                Rs.
+                (Col 17
+                x Col
+                20)
+                </th>
+        </tr>
+        <tr>
+            <th>1</th>
+            <th>2</th>
+            <th>3</th>
+            <th>4</th>
+            <th>5</th>
+            <th>6</th>
+            <th>7</th>
+            <th>8</th>
+            <th>9</th>
+            <th>10</th>
+            <th>11</th>
+            <th>12</th>
+            <th>13</th>
+            <th>14</th>
+            <th>15</th>
+            <th>16</th>
+            <th>17</th>
+            <th>18</th>
+            <th>19</th>
+            <th>20</th>
+            <th>21</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+        </tr>
+    </tbody>
+</table>
+</div>
+`;
+}
+
+
+
+
+
+
+
+
+ GJ: {
+    ...commonFieldsForWest,
+    form15: {
+      staticAction: false,
+      label: "Form-15",
+      header: form15ForGJ,
+      keys: [],
+      dataSet: [
+        "slNo",
+        "employeeName",
+        "dateOfBirth",
+        "gender",
+        "permanentAddress",
+        "fatherNameOrHusbandName",
+        "dateOfJoining",
+        ["AlphabetAssinged", "designation"],
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: false,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    form18: {
+      staticAction: false,
+      label: "Form-18",
+      header: form18ForGJ,
+      keys: [],
+      dataSet: [
+        "employeeName",
+        "gender",
+        "fatherNameOrHusbandName",
+        "department",
+        "designation",
+        "dateOfJoining",
+        "lastDayOfWorking",
+        "", "", "", "", "", "", "", ""
+      ],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: true,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    form19: {
+      staticAction: false,
+      label: "Form-19",
+      header: form19ForGJ,
+      keys: ["employeeName", "department", "designation", "dateOfJoining", "lastDayOfWorking", "gender", "fatherNameOrHusbandName",
+        "serialNumberInRegister", "paymentDate", "isLeaveRefused"],
+      dataSet: ["", "", "", "", ""],
+      paperSize: "A2",
+      paperOrientation: "landscape",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: true,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    form25: {
+      staticAction: false,
+      label: "Form-25",
+      header: form25ForGJ,
+      keys: ["year", "registrationNumber", "licenceNumber", "NICCode", "organisationName", "occupierName",
+        "managerName", "district", "locationAddress", "industry", "industryNature", "sector", "noOfDaysFactoryWorked", "adolescentMen", "adolescentWomen",
+        "adultMen", "adultWomen", "childrenFemale", "childrenMen", "fullTimeEmployee", "partTimeEmployee", "totalNumberOfEmployeeInHazardousProcess", "others",
+        "month", "namesOfAgents", "workerExaminedByMedicalOfficer"],
+      dataSet: [],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: false,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    form5: {
+      staticAction: false,
+      label: "Form-5",
+      header: form5ForGJ,
+      keys: ["organisationName", "employerNameAndAddress", "startDate", "endDate", "month"],
+      dataSet: [
+        "slNo",
+        "employeeId",
+        "employeeName",
+        "designation",
+        "totalWorkingDays",
+        "totalPresentDays",
+        "", "", "", "",
+        "bankAccountNo"
+      ],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: false,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    formA1: {
+      staticAction: false,
+      label: "Form-A1",
+      header: formA1ForGJ,
+      keys: ["organisationName",
+        "employerNameAndAddress",
+        "establishmentType",
+        "totalEmployeeCountWithinThePeriod",
+        "paymentMethod",
+        "employee_LWF",
+        "employer_LWF",
+        "paymentMethod", "year", "month"
+      ],
+      dataSet: [],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: false,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+    form4A: {
+      staticAction: false,
+      label: "Form-4A",
+      header: form4AForGJ,
+      keys: ["organisationName",
+        "employerNameAndAddress",
+        "wagePeriod"
+      ],
+      dataSet: [
+        "slNo",
+        "employeeId",
+        "employeeName",
+        "fatherNameOrHusbandName",
+        "designation",
+        "totalPresentDays",
+        "",
+        "",
+        "totalOvertimeWorked",
+        "monthlyCTC",
+        "totalDeductions",
+        "",
+        "",
+        "",
+        ["", "", "basic", "DA"],
+        "employee_PF",
+        "employee_ESI",
+        "HRA",
+        "otherDeduction",
+        "totalDeduction"
+
+      ],
+      paperSize: "A4",
+      paperOrientation: "portrait",
+      isHeightWidth: false,
+      height: "0px",
+      width: "0px",
+      iterative: false,
+      columnSize: "1000",
+      genderSpecific: -1, // -1 : all , 0 : male, 1: female
+    },
+  },
+
+
+
+
+
+
+
+
+
+
+
